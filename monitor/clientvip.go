@@ -75,9 +75,7 @@ func Update(batch map[string]*ClientVIP) {
 	// Add clientVIPs that are in this batch
 	for _, vipInfo := range batch {
 		_, existing := clientVIPs[vipInfo.VipAddress]
-		if existing {
-			delete(clientVIPs, vipInfo.VipAddress)
-		} else {
+		if !existing {
 			logger.Info().
 				Str("service", vipInfo.ServiceName).
 				Str("vip", vipInfo.VipAddress).

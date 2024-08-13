@@ -123,11 +123,12 @@ func (job *VipCast) monitorConsulClients(ctx context.Context) {
 			// Get fresh set of Clients, they might be updated since last time.
 			clients := monitor.GetConsulMonitorTargets()
 			for _, client := range clients {
-				jitterMs := fastrand.Uint32n(jitterMaxMs)
-				time.Sleep(time.Duration(jitterMs) * time.Millisecond)
-
 				go func(ct context.Context, cl *monitor.ClientVIP) {
 					log := logger.With().Str("vip", cl.VipAddress).Str("service", cl.ServiceName).Logger()
+					// Applying jitter to avoid Consul rate limit issues
+					jitterMs := fastrand.Uint32n(jitterMaxMs)
+					time.Sleep(time.Duration(jitterMs) * time.Millisecond)
+
 					healthCh := make(chan bool, 1)
 					healthCh <- job.consulApi.HealthCheck(ct, cl.ServiceName)
 					select {

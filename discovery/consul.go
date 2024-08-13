@@ -261,12 +261,6 @@ func (c *ConsulApiClient) Discover(ctx context.Context) {
 	logger.Info().Str("interval", fmt.Sprintf("%ds", *c.config.ClientSDInterval)).
 		Msgf("starting discovery at %s", *c.config.HttpAddr)
 
-	// Add a jitter for connection timeout in order to prevent Thundering herd problem
-	// when all the connections are established at the same time.
-	// See https://en.wikipedia.org/wiki/Thundering_herd_problem
-	jitterMs := fastrand.Uint32n(jitterMaxMs)
-	time.Sleep(time.Duration(jitterMs) * time.Millisecond)
-
 	errCh := make(chan error, 1)
 	go func() { errCh <- c.findClients(ctx) }()
 	select {
@@ -282,11 +276,13 @@ func (c *ConsulApiClient) Discover(ctx context.Context) {
 	for {
 		select {
 		case <-ticker.C:
-			jitterMs := fastrand.Uint32n(jitterMaxMs)
-			time.Sleep(time.Duration(jitterMs) * time.Millisecond)
-
 			errCh := make(chan error, 1)
-			go func() { errCh <- c.findClients(ctx) }()
+			go func() {
+				jitterMs := fastrand.Uint32n(jitterMaxMs)
+				time.Sleep(time.Duration(jitterMs) * time.Millisecond)
+
+				errCh <- c.findClients(ctx)
+			}()
 			select {
 			case <-ctx.Done():
 				<-errCh // Wait for findClients to return.
