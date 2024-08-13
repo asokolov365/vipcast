@@ -1,0 +1,114 @@
+name: main
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - "**.md"
+  pull_request:
+    branches:
+      - main
+    paths-ignore:
+      - "**.md"
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Code checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        id: go
+        uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: false
+
+      - name: Cache Go artifacts
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+            ~/go/bin
+          key: go-artifacts-${{ runner.os }}-check-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum', 'Makefile') }}
+          restore-keys: go-artifacts-${{ runner.os }}-check-
+
+      - name: Run check
+        run: |
+          make check
+          git diff --exit-code
+
+  build:
+    needs: lint
+    name: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Code checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        id: go
+        uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: false
+
+      - name: Cache Go artifacts
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+            ~/go/bin
+          key: go-artifacts-${{ runner.os }}-crossbuild-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum', 'Makefile') }}
+          restore-keys: go-artifacts-${{ runner.os }}-crossbuild-
+
+      - name: Build
+        run: make crossbuild
+
+  test:
+    needs: lint
+    strategy:
+      matrix:
+        scenario: ["test-full"]
+    name: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Code checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        id: go
+        uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: false
+
+      - name: Cache Go artifacts
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+            ~/go/bin
+          key: go-artifacts-${{ runner.os }}-${{ matrix.scenario }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum', 'Makefile') }}
+          restore-keys: go-artifacts-${{ runner.os }}-${{ matrix.scenario }}-
+
+      - name: run tests
+        run: make ${{ matrix.scenario}}
+
+      - name: Upload coverage reports to Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          file: ./coverage.txt
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
