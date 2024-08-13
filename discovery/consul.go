@@ -181,7 +181,7 @@ SERVICE_LOOP:
 		}
 	}
 
-	logger.Debug().Msgf("spent %d ms in client vips discovery", time.Since(startTime).Milliseconds())
+	logger.Debug().Msgf("spent %d ms in Consul service discovery", time.Since(startTime).Milliseconds())
 
 	// Update ClientVIPs with what is discovered in this pass
 	monitor.Update(foundClients)
@@ -272,7 +272,7 @@ func (c *ConsulApiClient) Discover(ctx context.Context) {
 	select {
 	case <-ctx.Done():
 		<-errCh // Wait for findClients to return.
-		logger.Info().Msgf("stopping discovery at %s", *c.config.HttpAddr)
+		logger.Info().Msgf("stopping Consul service discovery at %s", *c.config.HttpAddr)
 		return
 	case err := <-errCh:
 		logger.Error().Err(err).Msg("findClients error")
@@ -290,7 +290,7 @@ func (c *ConsulApiClient) Discover(ctx context.Context) {
 			select {
 			case <-ctx.Done():
 				<-errCh // Wait for findClients to return.
-				logger.Info().Msgf("stopping discovery at %s", *c.config.HttpAddr)
+				logger.Info().Msgf("stopping Consul service discovery at %s", *c.config.HttpAddr)
 				return
 			case err := <-errCh:
 				logger.Error().Err(err).Msg("findClients error")
@@ -298,7 +298,7 @@ func (c *ConsulApiClient) Discover(ctx context.Context) {
 			}
 
 		case <-ctx.Done():
-			logger.Info().Msgf("stopping discovery at %s", *c.config.HttpAddr)
+			logger.Info().Msgf("stopping Consul service discovery at %s", *c.config.HttpAddr)
 			return
 		}
 	}

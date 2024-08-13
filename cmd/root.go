@@ -87,12 +87,12 @@ var rootCmd = &cobra.Command{
 		}
 		if *config.AppConfig.Consul.ClientSDInterval < 10 {
 			logger.Warn().Int("interval", *config.AppConfig.Consul.ClientSDInterval).
-				Msg("consul.client-discovery-interval is too short, setting to 10")
+				Msg("consul.client-discovery-interval is too short, setting it to 10")
 			*config.AppConfig.Consul.ClientSDInterval = 10
 		}
 		if *config.AppConfig.MonitorInterval < 5 {
 			logger.Warn().Int("interval", *config.AppConfig.Consul.ClientSDInterval).
-				Msg("monitor-interval is too short, setting to 5")
+				Msg("monitor-interval is too short, setting it to 5")
 			*config.AppConfig.MonitorInterval = 5
 		}
 

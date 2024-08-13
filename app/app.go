@@ -142,7 +142,7 @@ func (job *VipCast) monitorConsulClients(ctx context.Context) {
 							log.Warn().Msg("service is not healthy")
 						}
 						// default:
-						// 	log.Info().Msgf("monitoring Consul service %s", cl.ServiceName)
+						// 	log.Info().Msg("monitoring Consul service")
 					}
 				}(ctx, client)
 			}

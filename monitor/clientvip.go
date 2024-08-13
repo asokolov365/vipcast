@@ -89,7 +89,7 @@ func Update(batch map[string]*ClientVIP) {
 
 	clientVipsEntries.Set(float64(len(clientVIPs)))
 
-	logger.Debug().Msgf("spent %d µs to update client vips", time.Since(startTime).Microseconds())
+	logger.Debug().Msgf("spent %d µs in update client vips", time.Since(startTime).Microseconds())
 }
 
 func GetConsulMonitorTargets() map[string]*ClientVIP {
