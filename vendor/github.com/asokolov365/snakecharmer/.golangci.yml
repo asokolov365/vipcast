@@ -1,0 +1,59 @@
+# https://golangci-lint.run/usage/linters/
+run:
+  timeout: 5m
+
+linters:
+  disable-all: true
+  enable:
+  - revive
+  - bodyclose
+  - depguard
+  - dogsled
+  # - dupl
+  - errcheck
+  # - exhaustive
+  - exportloopref
+  # - funlen
+  - gas
+  - gochecknoinits
+  - goconst
+  # - gocritic
+  - gocyclo
+  - gofmt
+  - goimports
+  - gomnd
+  - goprintffuncname
+  - gosec
+  - gosimple
+  - govet
+  - ineffassign
+  # - lll
+  - megacheck
+  - misspell
+  - nakedret
+  - noctx
+  - nolintlint
+  - staticcheck
+  - stylecheck
+  - typecheck
+  - unconvert
+  - unparam
+  - unused
+  # - whitespace
+  fast: false
+
+issues:
+  exclude-rules:
+  - linters:
+    - staticcheck
+    text: "SA(4003|1019|5011):"
+  include:
+  - EXC0012
+  - EXC0014
+
+linters-settings:
+  govet:
+    enable:
+      - fieldalignment
+#   errcheck:
+#     exclude: ./errcheck_excludes.txt
