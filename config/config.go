@@ -45,8 +45,8 @@ type ConsulConfig struct {
 	NodeName         *string   `mapstructure:"node,omitempty" env:"CONSUL_NODE" usage:"Provides access to Node data in Consul (CONSUL_NODE)."`
 	AllowStale       *bool     `mapstructure:"allow-stale,omitempty" env:"CONSUL_ALLOW_STALE" usage:"This allows the Consul agent to service the request from its cache (CONSUL_ALLOW_STALE)."`
 	ServiceName      *string   `mapstructure:"service-name,omitempty" env:"VIPCAST_CONSUL_SERVICE_NAME" usage:"The vipcast service name as it registered in Consul. This used for vipcast neigbors discovery"`
-	ClientSDTags     *[]string `mapstructure:"client-discovery-tags,omitempty" env:"VIPCAST_CONSUL_CLIENT_SD_TAGS" usage:"Tags to find client apps in Consul."`
-	ClientSDInterval *int      `mapstructure:"client-discovery-interval,omitempty" env:"VIPCAST_CONSUL_CLIENT_SD_INTERVAL" usage:"Time to wait in seconds between query Consul for new client apps."`
+	ClientSDTags     *[]string `mapstructure:"discovery-tags,omitempty" env:"VIPCAST_CONSUL_CLIENT_SD_TAGS" usage:"Tags to find client apps in Consul."`
+	ClientSDInterval *int      `mapstructure:"discovery-interval,omitempty" env:"VIPCAST_CONSUL_CLIENT_SD_INTERVAL" usage:"Time to wait in seconds between query Consul for new client apps."`
 }
 
 type LoggingConfig struct {
@@ -75,8 +75,8 @@ consul:
   node: ''
   allow-stale: true
   service-name: vipcast
-  client-discovery-tags: [enable_vipcast]
-  client-discovery-interval: 60
+  discovery-tags: [enable_vipcast]
+  discovery-interval: 60
 log:
   level: info
   location: true
