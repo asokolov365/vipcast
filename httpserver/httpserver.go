@@ -131,7 +131,7 @@ func (s *Server) Serve(ctx context.Context) {
 		// Gracefully shutdown http server with 10s deadline
 		deadLine := time.Now().Add(10 * time.Second)
 		deadLineCtx, deadLineCtxCancel := context.WithDeadline(context.Background(), deadLine)
-		logger.Info().Msgf("stopping httpserver at http://%s/", s.listenAddr)
+		logger.Info().Msgf("stopping API server at http://%s/", s.listenAddr)
 		if err := srv.Shutdown(deadLineCtx); err != nil {
 			// Error from closing listeners, or context timeout:
 			logger.Error().Err(err).Msg("httpserver.Shutdown() failed")
@@ -139,7 +139,7 @@ func (s *Server) Serve(ctx context.Context) {
 		deadLineCtxCancel()
 		close(idleConnsClosed)
 	}()
-	logger.Info().Msgf("starting httpserver at http://%s/", s.listenAddr)
+	logger.Info().Msgf("starting API server at http://%s/", s.listenAddr)
 	logger.Info().Msgf("pprof handlers are exposed at http://%s/debug/pprof/", s.listenAddr)
 	if err := srv.ListenAndServe(); err != http.ErrServerClosed {
 		// Error starting or closing listener
