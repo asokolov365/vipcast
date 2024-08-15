@@ -18,14 +18,13 @@ package monitor
 import (
 	"context"
 	"strings"
+	"sync"
 
 	"github.com/asokolov365/vipcast/lib/logging"
 	"github.com/rs/zerolog"
 )
 
 var logger *zerolog.Logger
-
-var storage *monStorage
 
 func Init() {
 	if logger == nil {
@@ -34,67 +33,22 @@ func Init() {
 	storage = NewStorage()
 }
 
-// MonitorType defines monitor types.
-type MonitorType int8
-
-const (
-	None MonitorType = iota
-	Consul
-	Port
-	Exec
-	Http
-	Dns
-)
-
-// String returns a string representation of the monitor type
-func (t MonitorType) String() string {
-	switch t {
-	case Consul:
-		return "consul"
-	case Port:
-		return "port"
-	case Exec:
-		return "exec"
-	case Http:
-		return "http"
-	case Dns:
-		return "dns"
-	default:
-		return "none"
-	}
-}
-
-func TypeFromString(t string) MonitorType {
-	t = strings.ToLower(strings.TrimSpace(t))
-	switch t {
-	case "consul":
-		return Consul
-	case "port":
-		return Port
-	case "exec":
-		return Exec
-	case "http":
-		return Http
-	case "dns":
-		return Dns
-	default:
-		return None
-	}
-}
-
 // Monitor is an interface which all monitor backends must implement.
 type Monitor interface {
+	// Service Name
 	Service() string
+	// VipAddress returns VIP address of the service.
+	VipAddress() string
+	// BgpCommunities returns list of BGP communities assosiated with the VIP address of the service.
+	BgpCommunities() []string
+	// Registrar returns what subsys registered Monitor.
+	Registrar() Registrar
 	// IsHealthy runs health check for the service.
 	IsHealthy(ctx context.Context) bool
 	// HealthStatus returns last known health status of the service.
 	HealthStatus() HealthStatus
 	// SetHealthStatus sets health status of the service.
 	SetHealthStatus(health HealthStatus)
-	// VipAddress returns VIP address of the service.
-	VipAddress() string
-	// BgpCommunities returns list of BGP communities assosiated with the VIP address of the service.
-	BgpCommunities() []string
 	// SetMaintenance sets the maintenance flag for the service.
 	// Services under maintenance will not be monitored and advertised via BGP protocol.
 	SetMaintenance(isMaintenance bool)
@@ -106,7 +60,51 @@ type Monitor interface {
 	Type() MonitorType
 }
 
-func NewMonitor(serviceName, vipAddress string, bgpCommString string, monitorString string) (Monitor, error) {
+type defaultMonitor struct {
+	lock         sync.Mutex
+	serviceName  string
+	registrar    Registrar
+	vipInfo      *vipInfo
+	maintenance  bool
+	healthStatus HealthStatus
+}
+
+// ServiceName implements Monitor interface ServiceName()
+func (m *defaultMonitor) Service() string { return m.serviceName }
+
+// VipAddress implements Monitor interface VipAddress()
+func (m *defaultMonitor) VipAddress() string { return m.vipInfo.address }
+
+// BgpCommunities implements Monitor interface BgpCommunities()
+func (m *defaultMonitor) BgpCommunities() []string { return m.vipInfo.bgpCommunities }
+
+// Registrar implements Monitor interface Registrar()
+func (m *defaultMonitor) Registrar() Registrar { return m.registrar }
+
+// HealthStatus implements Monitor interface HealthStatus()
+func (m *defaultMonitor) HealthStatus() HealthStatus { return m.healthStatus }
+
+// SetHealthStatus implements Monitor interface SetHealthStatus()
+func (m *defaultMonitor) SetHealthStatus(health HealthStatus) {
+	m.lock.Lock()
+	defer m.lock.Unlock()
+
+	m.healthStatus = health
+}
+
+// SetMaintenance implements Monitor interface SetMaintenance()
+func (m *defaultMonitor) SetMaintenance(isMaintenance bool) {
+	m.lock.Lock()
+	defer m.lock.Unlock()
+
+	m.maintenance = isMaintenance
+}
+
+// IsUnderMaintenance implements Monitor interface IsUnderMaintenance()
+func (m *defaultMonitor) IsUnderMaintenance() bool { return m.maintenance }
+
+func NewMonitor(serviceName, vipAddress string, bgpCommString string, monitorString string,
+	registrar Registrar) (Monitor, error) {
 	// valid monitorString formats are:
 	// "port:tcp:123" , "exec:/local/check.sh", "consul", "http://localhost", "dns:type:dname" "none"
 	monitorString = strings.ToLower(strings.TrimSpace(monitorString))
@@ -115,7 +113,7 @@ func NewMonitor(serviceName, vipAddress string, bgpCommString string, monitorStr
 
 	switch monType {
 	case Consul:
-		mon, err := NewConsulMonitor(serviceName, vipAddress, bgpCommString)
+		mon, err := NewConsulMonitor(serviceName, vipAddress, bgpCommString, registrar)
 		if err != nil {
 			return nil, err
 		}
@@ -152,18 +150,10 @@ func NewMonitor(serviceName, vipAddress string, bgpCommString string, monitorStr
 	// 	mon.Command = parts[1]
 	// 	mon.Type = monitor.ExecMonitor
 	default:
-		mon, err := NewNoneMonitor(serviceName, vipAddress, bgpCommString)
+		mon, err := NewNoneMonitor(serviceName, vipAddress, bgpCommString, registrar)
 		if err != nil {
 			return nil, err
 		}
 		return mon, nil
 	}
-}
-
-// Storage returns the storage for all known monitors.
-func Storage() *monStorage {
-	if storage == nil {
-		storage = NewStorage()
-	}
-	return storage
 }

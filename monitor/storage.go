@@ -22,6 +22,8 @@ import (
 	"github.com/VictoriaMetrics/metrics"
 )
 
+var storage *monStorage
+
 // Metrics
 var (
 	clientVipsEntriesTotal       = metrics.NewGauge(`vipcast_client_vips_all_total`, nil)
@@ -41,6 +43,14 @@ func NewStorage() *monStorage {
 		lock:     sync.Mutex{},
 		monitors: make(map[string]Monitor, 100),
 	}
+}
+
+// Storage returns the storage for all known monitors.
+func Storage() *monStorage {
+	if storage == nil {
+		storage = NewStorage()
+	}
+	return storage
 }
 
 func (s *monStorage) AddOne(m Monitor) {

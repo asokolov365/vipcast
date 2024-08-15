@@ -17,58 +17,41 @@ package monitor
 import (
 	"context"
 	"strings"
+	"sync"
 )
 
 // NoneMonitor implements Monitor interface,
 // that doesn't checks client service health status.
 type NoneMonitor struct {
-	serviceName  string
-	vipInfo      *vipInfo
-	maintenance  bool
-	healthStatus HealthStatus
+	*defaultMonitor
 }
 
-func NewNoneMonitor(serviceName, vipAddress, bgpCommString string) (*NoneMonitor, error) {
+func NewNoneMonitor(serviceName, vipAddress, bgpCommString string,
+	registrar Registrar) (*NoneMonitor, error) {
 	vip, err := ParseVIP(vipAddress)
 	if err != nil {
 		return nil, err
 	}
+
 	bgpCommunities, err := ParseBgpCommunities(bgpCommString)
 	if err != nil {
 		return nil, err
 	}
+
 	return &NoneMonitor{
-		vipInfo:      &vipInfo{address: vip, bgpCommunities: bgpCommunities},
-		serviceName:  serviceName,
-		maintenance:  false,
-		healthStatus: Healthy,
+		&defaultMonitor{
+			lock:         sync.Mutex{},
+			serviceName:  serviceName,
+			registrar:    registrar,
+			vipInfo:      &vipInfo{address: vip, bgpCommunities: bgpCommunities},
+			maintenance:  false,
+			healthStatus: Healthy,
+		},
 	}, nil
 }
 
 // NoneMonitor always returns true (is healthy)
 func (m *NoneMonitor) IsHealthy(ctx context.Context) bool { return true }
-
-// HealthStatus implements Monitor interface HealthStatus()
-func (m *NoneMonitor) HealthStatus() HealthStatus { return Healthy }
-
-// SetHealthStatus implements Monitor interface SetHealthStatus()
-// SetHealthStatus for NoneMonitor doesn't do anything.
-func (m *NoneMonitor) SetHealthStatus(health HealthStatus) {}
-
-// ServiceName implements Monitor interface ServiceName()
-func (m *NoneMonitor) Service() string { return m.serviceName }
-
-// VipAddress implements Monitor interface VipAddress()
-func (m *NoneMonitor) VipAddress() string { return m.vipInfo.address }
-
-// BgpCommunities implements Monitor interface BgpCommunities()
-func (m *NoneMonitor) BgpCommunities() []string { return m.vipInfo.bgpCommunities }
-
-// SetMaintenance implements Monitor interface SetMaintenance()
-func (m *NoneMonitor) SetMaintenance(isMaintenance bool) { m.maintenance = isMaintenance }
-
-// IsUnderMaintenance implements Monitor interface IsUnderMaintenance()
-func (m *NoneMonitor) IsUnderMaintenance() bool { return m.maintenance }
 
 // Type implements Monitor interface Type()
 func (m *NoneMonitor) Type() MonitorType { return None }

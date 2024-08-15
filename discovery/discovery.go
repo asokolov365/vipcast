@@ -96,7 +96,7 @@ func (d *Discovery) findClients(ctx context.Context) error {
 
 		// Only VipAddress is mandatory
 		if len(vipAddress) > 0 {
-			mon, err := monitor.NewMonitor(service.Service, vipAddress, bgpCommString, monitorString)
+			mon, err := monitor.NewMonitor(service.Service, vipAddress, bgpCommString, monitorString, monitor.Discovery)
 			if err != nil {
 				logger.Warn().Err(err).
 					Str("service", mon.Service()).

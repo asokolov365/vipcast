@@ -25,14 +25,11 @@ import (
 // ConsulMonitor implements Monitor interface,
 // that checks client service health status via Consul API.
 type ConsulMonitor struct {
-	lock         sync.Mutex
-	serviceName  string
-	vipInfo      *vipInfo
-	maintenance  bool
-	healthStatus HealthStatus
+	*defaultMonitor
 }
 
-func NewConsulMonitor(serviceName, vipAddress, bgpCommString string) (*ConsulMonitor, error) {
+func NewConsulMonitor(serviceName, vipAddress, bgpCommString string,
+	registrar Registrar) (*ConsulMonitor, error) {
 
 	vip, err := ParseVIP(vipAddress)
 	if err != nil {
@@ -45,16 +42,21 @@ func NewConsulMonitor(serviceName, vipAddress, bgpCommString string) (*ConsulMon
 	}
 
 	return &ConsulMonitor{
-		vipInfo:      &vipInfo{address: vip, bgpCommunities: bgpCommunities},
-		serviceName:  serviceName,
-		maintenance:  false,
-		healthStatus: Undefined,
+		&defaultMonitor{
+			lock:         sync.Mutex{},
+			serviceName:  serviceName,
+			registrar:    registrar,
+			vipInfo:      &vipInfo{address: vip, bgpCommunities: bgpCommunities},
+			maintenance:  false,
+			healthStatus: Undefined,
+		},
 	}, nil
 }
 
 // IsHealthy implements Monitor interface IsHealthy()
 func (m *ConsulMonitor) IsHealthy(ctx context.Context) bool {
 	status, err := consul.ApiClient().ServiceHealthStatus(ctx, m.serviceName)
+	// check if error is context cancelled
 	if err != nil {
 		logger.Error().Err(err).
 			Str("vip", m.vipInfo.address).
@@ -63,37 +65,6 @@ func (m *ConsulMonitor) IsHealthy(ctx context.Context) bool {
 	}
 	return status == "passing"
 }
-
-// HealthStatus implements Monitor interface HealthStatus()
-func (m *ConsulMonitor) HealthStatus() HealthStatus { return m.healthStatus }
-
-// SetHealthStatus implements Monitor interface SetHealthStatus()
-func (m *ConsulMonitor) SetHealthStatus(health HealthStatus) {
-	m.lock.Lock()
-	defer m.lock.Unlock()
-
-	m.healthStatus = health
-}
-
-// ServiceName implements Monitor interface ServiceName()
-func (m *ConsulMonitor) Service() string { return m.serviceName }
-
-// VipAddress implements Monitor interface VipAddress()
-func (m *ConsulMonitor) VipAddress() string { return m.vipInfo.address }
-
-// BgpCommunities implements Monitor interface BgpCommunities()
-func (m *ConsulMonitor) BgpCommunities() []string { return m.vipInfo.bgpCommunities }
-
-// SetMaintenance implements Monitor interface SetMaintenance()
-func (m *ConsulMonitor) SetMaintenance(isMaintenance bool) {
-	m.lock.Lock()
-	defer m.lock.Unlock()
-
-	m.maintenance = isMaintenance
-}
-
-// IsUnderMaintenance implements Monitor interface IsUnderMaintenance()
-func (m *ConsulMonitor) IsUnderMaintenance() bool { return m.maintenance }
 
 // Type implements Monitor interface Type()
 func (m *ConsulMonitor) Type() MonitorType {
