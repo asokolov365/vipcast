@@ -40,16 +40,7 @@ var rootCmd = &cobra.Command{
 	// Long:  `A longer description that spans multiple lines and likely contains`,
 
 	// examples and usage of using your application. For example:
-	// 	Example: `# This will partition the input file to 5 shards
-	// # each rule under "groups.*.rules" will be written to 2 shards,
-	// # the result will be stored in /tmp/node3/recording-rules.yml
-	// > vipcast --src="./recording-rules.yml" \
-	//   --split-at="groups.*.rules" \
-	//   --shards-count=5 \
-	//   --replication=2 \
-	//   --shard-id=3 \
-	//   --dst="/tmp" \
-	//   --shard-basename="node"`,
+	// Example: `Some example`,
 
 	// Disable automatic printing of usage information whenever an error
 	// occurs. Many errors are not the result of a bad command invocation,
