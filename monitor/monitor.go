@@ -16,7 +16,8 @@
 package monitor
 
 import (
-	"fmt"
+	"context"
+	"strings"
 
 	"github.com/asokolov365/vipcast/lib/logging"
 	"github.com/rs/zerolog"
@@ -24,64 +25,145 @@ import (
 
 var logger *zerolog.Logger
 
+var storage *monStorage
+
 func Init() {
 	if logger == nil {
 		logger = logging.GetSubLogger("monitor")
 	}
+	storage = NewStorage()
 }
 
 // MonitorType defines monitor types.
 type MonitorType int8
 
 const (
-	// ConsulMonitor defines consul monitor type.
-	ConsulMonitor MonitorType = iota
-	// PortMonitor defines port monitor type.
-	PortMonitor
-	// ExecMonitor defines exec monitor type.
-	ExecMonitor
-	// NoMonitor defines no monitor type.
-	NoMonitor
+	None MonitorType = iota
+	Consul
+	Port
+	Exec
+	Http
+	Dns
 )
 
+// String returns a string representation of the monitor type
 func (t MonitorType) String() string {
 	switch t {
-	case ConsulMonitor:
+	case Consul:
 		return "consul"
-	case PortMonitor:
+	case Port:
 		return "port"
-	case ExecMonitor:
+	case Exec:
 		return "exec"
+	case Http:
+		return "http"
+	case Dns:
+		return "dns"
 	default:
 		return "none"
 	}
 }
 
-type Monitor struct {
-	Type     MonitorType
-	Protocol string
-	Port     int
-	Command  string
-}
-
-func (m1 *Monitor) Equal(m2 *Monitor) bool {
-	switch m1.Type {
-	case PortMonitor:
-		return fmt.Sprintf("%s:%s:%d", m1.Type.String(), m1.Protocol, m1.Port) == fmt.Sprintf("%s:%s:%d", m2.Type.String(), m2.Protocol, m2.Port)
-	case ExecMonitor:
-		return fmt.Sprintf("%s:%s", m1.Type.String(), m1.Command) == fmt.Sprintf("%s:%s", m2.Type.String(), m2.Command)
+func TypeFromString(t string) MonitorType {
+	t = strings.ToLower(strings.TrimSpace(t))
+	switch t {
+	case "consul":
+		return Consul
+	case "port":
+		return Port
+	case "exec":
+		return Exec
+	case "http":
+		return Http
+	case "dns":
+		return Dns
 	default:
-		return m1.Type.String() == m2.Type.String()
+		return None
 	}
 }
 
-func (m *Monitor) String() string {
-	switch m.Type {
-	case PortMonitor:
-		return fmt.Sprintf("%s:%s:%d", m.Type.String(), m.Protocol, m.Port)
-	case ExecMonitor:
-		return fmt.Sprintf("%s:%s", m.Type.String(), m.Command)
+// Monitor is an interface which all monitor backends must implement.
+type Monitor interface {
+	Service() string
+	// IsHealthy runs health check for the service.
+	IsHealthy(ctx context.Context) bool
+	// HealthStatus returns last known health status of the service.
+	HealthStatus() HealthStatus
+	// SetHealthStatus sets health status of the service.
+	SetHealthStatus(health HealthStatus)
+	// VipAddress returns VIP address of the service.
+	VipAddress() string
+	// BgpCommunities returns list of BGP communities assosiated with the VIP address of the service.
+	BgpCommunities() []string
+	// SetMaintenance sets the maintenance flag for the service.
+	// Services under maintenance will not be monitored and advertised via BGP protocol.
+	SetMaintenance(isMaintenance bool)
+	// IsUnderMaintenance returns true if the service is under maintenance.
+	IsUnderMaintenance() bool
+	// String returns string representation of the service.
+	String() string
+	// Type returns type of the service.
+	Type() MonitorType
+}
+
+func NewMonitor(serviceName, vipAddress string, bgpCommString string, monitorString string) (Monitor, error) {
+	// valid monitorString formats are:
+	// "port:tcp:123" , "exec:/local/check.sh", "consul", "http://localhost", "dns:type:dname" "none"
+	monitorString = strings.ToLower(strings.TrimSpace(monitorString))
+	parts := strings.Split(monitorString, ":")
+	monType := TypeFromString(parts[0])
+
+	switch monType {
+	case Consul:
+		mon, err := NewConsulMonitor(serviceName, vipAddress, bgpCommString)
+		if err != nil {
+			return nil, err
+		}
+		return mon, nil
+	// case strings.HasPrefix(monitorString, "port"):
+	// 	parts := strings.Split(monitorString, ":")
+	// 	if len(parts) != 3 {
+	// 		err := fmt.Errorf("invalid port monitor, must be port:proto:<port>")
+	// 		logger.Error().Err(err).Str("monitor", monitorString).Send()
+	// 		return nil, err
+	// 	}
+	// 	if parts[1] != "tcp" && parts[1] != "udp" {
+	// 		err := fmt.Errorf("invalid port monitor, proto must be tcp or udp")
+	// 		logger.Error().Err(err).Str("monitor", monitorString).Send()
+	// 		return nil, err
+	// 	}
+	// 	mon.Protocol = parts[1]
+	// 	port, err := strconv.ParseUint(parts[2], 10, 16)
+	// 	if err != nil {
+	// 		err := fmt.Errorf("invalid port monitor, port must be uint16")
+	// 		logger.Error().Err(err).Send()
+	// 		return nil, err
+	// 	}
+	// 	mon.Port = int(port)
+	// 	mon.Type = monitor.PortMonitor
+
+	// case strings.HasPrefix(monitorString, "exec"):
+	// 	parts := strings.Split(monitorString, ":")
+	// 	if len(parts) != 2 {
+	// 		err := fmt.Errorf("invalid exec monitor, must be exec:<command>")
+	// 		logger.Error().Err(err).Str("monitor", monitorString).Send()
+	// 		return nil, err
+	// 	}
+	// 	mon.Command = parts[1]
+	// 	mon.Type = monitor.ExecMonitor
 	default:
-		return m.Type.String()
+		mon, err := NewNoneMonitor(serviceName, vipAddress, bgpCommString)
+		if err != nil {
+			return nil, err
+		}
+		return mon, nil
 	}
+}
+
+// Storage returns the storage for all known monitors.
+func Storage() *monStorage {
+	if storage == nil {
+		storage = NewStorage()
+	}
+	return storage
 }
