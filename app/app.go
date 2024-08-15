@@ -17,17 +17,16 @@ package app
 
 import (
 	"context"
-	"fmt"
 	"strings"
-	"time"
 
 	"github.com/asokolov365/vipcast/config"
 	"github.com/asokolov365/vipcast/discovery"
 	"github.com/asokolov365/vipcast/httpserver"
+	"github.com/asokolov365/vipcast/lib/consul"
 	"github.com/asokolov365/vipcast/lib/logging"
 	"github.com/asokolov365/vipcast/monitor"
+	"github.com/hashicorp/consul/api"
 	"github.com/rs/zerolog"
-	"github.com/valyala/fastrand"
 )
 
 var (
@@ -35,39 +34,53 @@ var (
 	vipcast *VipCast
 )
 
-// Init initializes the vipcast jobs (ApiHttpServer, Monitors, BGP client, etc).
+type VipCast struct {
+	apiServer        *httpserver.Server
+	serviceDiscovery *discovery.Discovery
+	monitorManager   *monitor.Manager
+}
+
+// Init initializes the vipcast subsystems (httpserver, monitor, bgp, etc).
 func Init() error {
 	if logger == nil {
 		logger = logging.GetSubLogger("root")
 	}
-
-	var consulApi *discovery.ConsulApiClient
-	var err error
+	var (
+		serviceDiscovery *discovery.Discovery
+	)
 
 	httpserver.Init()
-	monitor.Init()
 	apiServer := httpserver.NewServer(*config.AppConfig.BindAddr, nil)
-
-	// Consul enabled
+	// is Consul SD enabled in config?
 	if strings.HasPrefix(*config.AppConfig.Consul.HttpAddr, "http") {
-		discovery.Init()
-		consulApi, err = discovery.NewConsulApiClient(config.AppConfig.Consul)
-		if err != nil {
+		consulApiConfig := api.DefaultConfig()
+		consulApiConfig.Address = *config.AppConfig.Consul.HttpAddr
+
+		if *config.AppConfig.Consul.HttpToken != "" {
+			consulApiConfig.Token = *config.AppConfig.Consul.HttpToken
+		}
+		consulQueryOpts := &api.QueryOptions{
+			AllowStale: *config.AppConfig.Consul.AllowStale,
+		}
+
+		if err := consul.NewApiClient(consulApiConfig,
+			*config.AppConfig.Consul.NodeName, consulQueryOpts); err != nil {
 			return err
 		}
+		discovery.Init()
+		serviceDiscovery = discovery.NewDiscovery()
 	}
 
+	monitor.Init()
+	monitorManager := monitor.NewManager(serviceDiscovery != nil, *config.AppConfig.MonitorInterval)
+
 	vipcast = &VipCast{
-		apiServer: apiServer,
-		consulApi: consulApi,
+		apiServer:        apiServer,
+		serviceDiscovery: serviceDiscovery,
+		monitorManager:   monitorManager,
 	}
 
 	return nil
-}
-
-type VipCast struct {
-	apiServer *httpserver.Server
-	consulApi *discovery.ConsulApiClient
 }
 
 // Run starts the vipcast.
@@ -81,12 +94,12 @@ func Run(ctx context.Context) error {
 
 func (job *VipCast) run(ctx context.Context) error {
 
-	// if Consul enabled
-	if job.consulApi != nil {
-		go job.consulApi.Discover(ctx)
-		go job.monitorConsulClients(ctx)
+	// is Consul enabled?
+	if job.serviceDiscovery != nil {
+		go job.serviceDiscovery.DiscoverClients(ctx)
 	}
-
+	go job.monitorManager.DoMonitor(ctx)
+	go monitor.Storage().UpdateMetrics(ctx)
 	job.apiServer.Serve(ctx)
 
 	// neighbors, err := job.consulApi.NeighborServiceList(ctx)
@@ -105,51 +118,4 @@ func (job *VipCast) run(ctx context.Context) error {
 	}
 
 	return nil
-}
-
-const jitterMaxMs uint32 = 1000
-
-func (job *VipCast) monitorConsulClients(ctx context.Context) {
-	poll := time.Duration(*config.AppConfig.MonitorInterval) * time.Second
-	ticker := time.NewTicker(poll)
-	defer ticker.Stop()
-
-	logger.Info().Str("interval", fmt.Sprintf("%ds", *config.AppConfig.MonitorInterval)).
-		Msgf("starting monitoring Consul services")
-
-	for {
-		select {
-		case <-ticker.C:
-			// Get fresh set of Clients, they might be updated since last time.
-			clients := monitor.GetConsulMonitorTargets()
-			for _, client := range clients {
-				go func(ct context.Context, cl *monitor.ClientVIP) {
-					log := logger.With().Str("vip", cl.VipAddress).Str("service", cl.ServiceName).Logger()
-					// Applying jitter to avoid Consul rate limit issues
-					jitterMs := fastrand.Uint32n(jitterMaxMs)
-					time.Sleep(time.Duration(jitterMs) * time.Millisecond)
-
-					healthCh := make(chan bool, 1)
-					healthCh <- job.consulApi.HealthCheck(ct, cl.ServiceName)
-					select {
-					case <-ct.Done():
-						<-healthCh // Wait for HealthCheck to return.
-						log.Info().Msg("stopping Consul monitoring")
-						return
-					case healthy := <-healthCh:
-						if healthy {
-							log.Debug().Msg("service is healthy")
-						} else {
-							log.Warn().Msg("service is not healthy")
-						}
-						// default:
-						// 	log.Info().Msg("monitoring Consul service")
-					}
-				}(ctx, client)
-			}
-		case <-ctx.Done():
-			logger.Info().Msg("stopping monitoring Consul services")
-			return
-		}
-	}
 }
