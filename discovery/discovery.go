@@ -83,13 +83,13 @@ func (d *Discovery) findClients(ctx context.Context) error {
 				continue
 			}
 			switch parts[0] {
-			case "gocast_vip", "vipcast_vip":
+			case "vipcast_vip", "gocast_vip":
 				vipAddress = parts[1]
 
-			case "gocast_vip_communities", "vipcast_bgp_communities":
+			case "vipcast_bgp_communities", "gocast_vip_communities":
 				bgpCommString = parts[1]
 
-			case "gocast_monitor", "vipcast_monitor":
+			case "vipcast_monitor", "gocast_monitor":
 				monitorString = parts[1]
 			}
 		}

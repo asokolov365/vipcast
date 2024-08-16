@@ -44,17 +44,18 @@ func TestParseVIP_Error(t *testing.T) {
 func TestParseBgpCommunities_NoError(t *testing.T) {
 	t.Parallel()
 
-	f := func(bgpCommString string, expected []uint32) {
+	f := func(bgpCommString string, expected Communities) {
 		t.Helper()
 
 		comms, err := ParseBgpCommunities(bgpCommString)
 		require.NoError(t, err)
 		require.Equal(t, expected, comms)
 	}
-	f("0", []uint32{uint32(0)})
-	f("4294967295", []uint32{uint32(4294967295)})
-	f("22697:10001", []uint32{(uint32(22697)<<16 | uint32(10001))})
-	f("22697:10001,22697:10002", []uint32{(uint32(22697)<<16 | uint32(10001)), (uint32(22697)<<16 | uint32(10002))})
+	f("", Communities{})
+	f("0", Communities{uint32(0)})
+	f("4294967295", Communities{uint32(4294967295)})
+	f("22697:10001", Communities{(uint32(22697)<<16 | uint32(10001))})
+	f("22697:10001,22697:10002", Communities{(uint32(22697)<<16 | uint32(10001)), (uint32(22697)<<16 | uint32(10002))})
 }
 
 func TestParseBgpCommunities_Error(t *testing.T) {
@@ -65,9 +66,8 @@ func TestParseBgpCommunities_Error(t *testing.T) {
 
 		comms, err := ParseBgpCommunities(bgpCommString)
 		require.Error(t, err)
-		require.Equal(t, []uint32{}, comms)
+		require.Equal(t, Communities{}, comms)
 	}
-	f("")
 	f("-1")
 	f("foo")
 	f("4294967296")

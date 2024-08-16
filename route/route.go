@@ -70,18 +70,40 @@ func (c Communities) Equal(other Communities) bool {
 	return true
 }
 
+// AsStrings returns a string representation of the Communities
+// as two 16-bit numbers (0-65535):(0-65535)
+func (c Communities) AsStrings() []string {
+	if len(c) == 0 {
+		return []string{}
+	}
+	res := make([]string, 0, len(c))
+	for _, v := range c {
+		p1 := v >> 16
+		p2 := uint16(v & (1<<16 - 1))
+		s := fmt.Sprintf("%d:%d", p1, p2)
+		res = append(res, s)
+	}
+	return res
+}
+
 // ParseVIP parses the specified IP address.
 // Acceptable formats are
 // IPv4: a.b.c.d, a.b.c.d/32
 // IPv6: a.b.c.d.e.f.g.h, a.b.c.d.e.f.g.h/128
 func ParseVIP(vip string) (*net.IPNet, error) {
+	defaultErr := fmt.Errorf("%q is not valid VIP", vip)
+
+	if strings.TrimSpace(vip) == "" {
+		return nil, defaultErr
+	}
+
 	var cidr string
 
 	parts := strings.Split(vip, "/")
 
 	ip := net.ParseIP(parts[0])
 	if ip == nil {
-		return nil, fmt.Errorf("%s is not valid VIP", vip)
+		return nil, defaultErr
 	}
 	isIPv4 := ip.To4() != nil // if ip is not an IPv4 address, To4 returns nil.
 
@@ -96,21 +118,21 @@ func ParseVIP(vip string) (*net.IPNet, error) {
 	case 2: // with prefix length
 		pLen, err := strconv.ParseUint(parts[1], 10, 8)
 		if err != nil {
-			return nil, fmt.Errorf("%s is not valid VIP: %v", vip, err)
+			return nil, defaultErr
 		}
 		if isIPv4 {
 			if pLen != 32 {
-				return nil, fmt.Errorf("%s is not valid VIP", vip)
+				return nil, defaultErr
 			}
 			cidr = fmt.Sprintf("%s/%d", ip.String(), 32)
 		} else {
 			if pLen != 128 {
-				return nil, fmt.Errorf("%s is not valid VIP", vip)
+				return nil, defaultErr
 			}
 			cidr = fmt.Sprintf("%s/%d", ip.String(), 128)
 		}
 	default:
-		return nil, fmt.Errorf("%s is not valid VIP", vip)
+		return nil, defaultErr
 	}
 	_, net, _ := net.ParseCIDR(cidr)
 	return net, nil
@@ -122,6 +144,10 @@ func ParseVIP(vip string) (*net.IPNet, error) {
 // as two 16-bit numbers (0-65535):(0-65535)
 func ParseBgpCommunities(bgpCommunities string) (Communities, error) {
 	comms := strings.Split(bgpCommunities, ",")
+	if len(comms[0]) == 0 {
+		return Communities{}, nil
+	}
+
 	result := make([]uint32, 0, len(comms))
 	for _, comm := range comms {
 		parts := strings.Split(comm, ":")
@@ -140,6 +166,7 @@ func ParseBgpCommunities(bgpCommunities string) (Communities, error) {
 				return []uint32{}, fmt.Errorf("not valid BGP community: %s", comm)
 			}
 			result = append(result, (uint32(first)<<16 | uint32(second)))
+
 		default:
 			return []uint32{}, fmt.Errorf("not valid BGP community: %s", comm)
 		}

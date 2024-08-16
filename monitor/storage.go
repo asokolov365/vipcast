@@ -52,18 +52,18 @@ func Storage() *monStorage {
 	return storage
 }
 
-func (s *monStorage) AddOne(newMon Monitor) {
+func (s *monStorage) AddOne(m Monitor) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 
-	if oldMon, exist := s.monitors[newMon.VipAddress()]; exist {
+	if oldMon, exist := s.monitors[m.VipAddress()]; exist {
 		// Don't replace Administratively registered Monitors
-		if oldMon.Registrar() == Admin && newMon.Registrar() != Admin {
+		if oldMon.Registrar() == Admin && m.Registrar() != Admin {
 			return
 		}
 	}
 	// delete(s.monitors, m.VipAddress())
-	s.monitors[newMon.VipAddress()] = newMon
+	s.monitors[m.VipAddress()] = m
 }
 
 func (s *monStorage) RemoveOne(vip string) {
