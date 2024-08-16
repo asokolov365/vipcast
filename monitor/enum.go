@@ -64,6 +64,27 @@ func TypeFromString(t string) MonitorType {
 	}
 }
 
+// Health defines possible service health statuses.
+type HealthStatus int8
+
+const (
+	NotHealthy HealthStatus = iota
+	Healthy
+	HealthUndefined
+)
+
+// String returns a string representation of the Health status
+func (t HealthStatus) String() string {
+	switch t {
+	case NotHealthy:
+		return "not healthy"
+	case Healthy:
+		return "healthy"
+	default:
+		return "undefined"
+	}
+}
+
 // Registrar defines the reporters, what subsys registered Monitor.
 // It is neccessary to distinguish Monitors registered via http API vs Discovered via Consul.
 type Registrar int8

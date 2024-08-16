@@ -21,6 +21,7 @@ import (
 	"sync"
 
 	"github.com/asokolov365/vipcast/lib/logging"
+	"github.com/asokolov365/vipcast/route"
 	"github.com/rs/zerolog"
 )
 
@@ -37,14 +38,14 @@ func Init() {
 type Monitor interface {
 	// Service Name
 	Service() string
+	// Route returns VIP address and a list of its BGP communities as Route.
+	Route() *route.Route
 	// VipAddress returns VIP address of the service.
 	VipAddress() string
-	// BgpCommunities returns list of BGP communities assosiated with the VIP address of the service.
-	BgpCommunities() []string
 	// Registrar returns what subsys registered Monitor.
 	Registrar() Registrar
-	// IsHealthy runs health check for the service.
-	IsHealthy(ctx context.Context) bool
+	// CheckHealth runs health check for the service.
+	CheckHealth(ctx context.Context) HealthStatus
 	// HealthStatus returns last known health status of the service.
 	HealthStatus() HealthStatus
 	// SetHealthStatus sets health status of the service.
@@ -64,7 +65,7 @@ type defaultMonitor struct {
 	lock         sync.Mutex
 	serviceName  string
 	registrar    Registrar
-	vipInfo      *vipInfo
+	route        *route.Route
 	maintenance  bool
 	healthStatus HealthStatus
 }
@@ -72,11 +73,10 @@ type defaultMonitor struct {
 // ServiceName implements Monitor interface ServiceName()
 func (m *defaultMonitor) Service() string { return m.serviceName }
 
-// VipAddress implements Monitor interface VipAddress()
-func (m *defaultMonitor) VipAddress() string { return m.vipInfo.address }
+func (m *defaultMonitor) Route() *route.Route { return m.route }
 
-// BgpCommunities implements Monitor interface BgpCommunities()
-func (m *defaultMonitor) BgpCommunities() []string { return m.vipInfo.bgpCommunities }
+// VipAddress implements Monitor interface VipAddress()
+func (m *defaultMonitor) VipAddress() string { return m.route.Prefix().String() }
 
 // Registrar implements Monitor interface Registrar()
 func (m *defaultMonitor) Registrar() Registrar { return m.registrar }
@@ -103,7 +103,7 @@ func (m *defaultMonitor) SetMaintenance(isMaintenance bool) {
 // IsUnderMaintenance implements Monitor interface IsUnderMaintenance()
 func (m *defaultMonitor) IsUnderMaintenance() bool { return m.maintenance }
 
-func NewMonitor(serviceName, vipAddress string, bgpCommString string, monitorString string,
+func NewMonitor(serviceName, vipAddress, bgpCommString, monitorString string,
 	registrar Registrar) (Monitor, error) {
 	// valid monitorString formats are:
 	// "port:tcp:123" , "exec:/local/check.sh", "consul", "http://localhost", "dns:type:dname" "none"

@@ -43,13 +43,21 @@ func (mm *Manager) DoMonitor(ctx context.Context) {
 	logger.Info().Str("interval", fmt.Sprintf("%v", mm.monitorInterval)).
 		Msgf("starting service monitoring")
 
+	timeout := time.Second * 2
+
 	for {
 		select {
+		case <-ctx.Done():
+			logger.Info().Msg("stopping service monitoring")
+			return
 		case <-ticker.C:
 			// Get fresh set of MonitorTargets, they might be updated since last time.
 			clients := storage.GetMonitorTargets(mm.consulSDEnabled)
+			if len(clients) == 0 {
+				logger.Debug().Msg("no clients for service monitoring")
+			}
 			for _, client := range clients {
-				go func(ct context.Context, m Monitor) {
+				go func(m Monitor) {
 					log := logger.With().
 						Str("vip", m.VipAddress()).
 						Str("service", m.Service()).
@@ -59,29 +67,24 @@ func (mm *Manager) DoMonitor(ctx context.Context) {
 					jitterMs := fastrand.Uint32n(jitterMaxMs)
 					time.Sleep(time.Duration(jitterMs) * time.Millisecond)
 
-					healthCh := make(chan bool, 1)
-					healthCh <- m.IsHealthy(ctx)
 					select {
-					case <-ct.Done():
-						<-healthCh // Wait for IsHealthy to return.
-						log.Info().Msg("stopping service monitoring during health check")
+					case <-ctx.Done():
 						return
-					case healthy := <-healthCh:
-						if healthy {
-							m.SetHealthStatus(Healthy)
+					default:
+						timeoutCtx, timeoutCtxCancel := context.WithTimeout(ctx, timeout)
+						health := m.CheckHealth(timeoutCtx)
+						m.SetHealthStatus(health)
+						switch health {
+						case Healthy:
 							log.Debug().Str("monitor", m.Type().String()).Msg("service is healthy")
-						} else {
-							m.SetHealthStatus(NotHealthy)
+						case NotHealthy:
 							log.Warn().Str("monitor", m.Type().String()).Msg("service is not healthy")
 						}
-						// default:
-						// 	log.Info().Msg("monitoring service")
+						timeoutCtxCancel()
+						return
 					}
-				}(ctx, client)
+				}(client)
 			}
-		case <-ctx.Done():
-			logger.Info().Msg("stopping service monitoring")
-			return
 		}
 	}
 }

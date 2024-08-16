@@ -71,7 +71,6 @@ func (c *apiClient) NodeServicesByTags(ctx context.Context, tags []string) ([]*a
 	svcList, _, err := c.consul.Catalog().NodeServiceList(
 		c.agentNodeName, c.queryOpts.WithContext(ctx),
 	)
-
 	if err != nil {
 		return nil, err
 	}

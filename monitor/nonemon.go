@@ -18,6 +18,8 @@ import (
 	"context"
 	"strings"
 	"sync"
+
+	"github.com/asokolov365/vipcast/route"
 )
 
 // NoneMonitor implements Monitor interface,
@@ -28,12 +30,8 @@ type NoneMonitor struct {
 
 func NewNoneMonitor(serviceName, vipAddress, bgpCommString string,
 	registrar Registrar) (*NoneMonitor, error) {
-	vip, err := ParseVIP(vipAddress)
-	if err != nil {
-		return nil, err
-	}
 
-	bgpCommunities, err := ParseBgpCommunities(bgpCommString)
+	route, err := route.New(vipAddress, bgpCommString)
 	if err != nil {
 		return nil, err
 	}
@@ -43,7 +41,7 @@ func NewNoneMonitor(serviceName, vipAddress, bgpCommString string,
 			lock:         sync.Mutex{},
 			serviceName:  serviceName,
 			registrar:    registrar,
-			vipInfo:      &vipInfo{address: vip, bgpCommunities: bgpCommunities},
+			route:        route,
 			maintenance:  false,
 			healthStatus: Healthy,
 		},
@@ -51,7 +49,7 @@ func NewNoneMonitor(serviceName, vipAddress, bgpCommString string,
 }
 
 // NoneMonitor always returns true (is healthy)
-func (m *NoneMonitor) IsHealthy(ctx context.Context) bool { return true }
+func (m *NoneMonitor) CheckHealth(ctx context.Context) HealthStatus { return Healthy }
 
 // Type implements Monitor interface Type()
 func (m *NoneMonitor) Type() MonitorType { return None }

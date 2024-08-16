@@ -1,4 +1,4 @@
-package monitor
+package route
 
 import (
 	"testing"
@@ -12,9 +12,9 @@ func TestParseVIP_NoError(t *testing.T) {
 	f := func(addr, expected string) {
 		t.Helper()
 
-		vip, err := ParseVIP(addr)
+		cidr, err := ParseVIP(addr)
 		require.NoError(t, err)
-		require.Equal(t, expected, vip)
+		require.Equal(t, expected, cidr.String())
 	}
 	f("1.2.3.4", "1.2.3.4/32")
 	f("1.2.3.4/32", "1.2.3.4/32")
@@ -28,9 +28,9 @@ func TestParseVIP_Error(t *testing.T) {
 	f := func(addr string) {
 		t.Helper()
 
-		vip, err := ParseVIP(addr)
+		cidr, err := ParseVIP(addr)
 		require.Error(t, err)
-		require.Equal(t, "", vip)
+		require.Nil(t, cidr)
 	}
 	f("1.2.3.4/24")
 	f("1.2.3/32")
@@ -44,17 +44,17 @@ func TestParseVIP_Error(t *testing.T) {
 func TestParseBgpCommunities_NoError(t *testing.T) {
 	t.Parallel()
 
-	f := func(bgpCommString string, expected []string) {
+	f := func(bgpCommString string, expected []uint32) {
 		t.Helper()
 
 		comms, err := ParseBgpCommunities(bgpCommString)
 		require.NoError(t, err)
 		require.Equal(t, expected, comms)
 	}
-	f("0", []string{"0"})
-	f("4294967295", []string{"4294967295"})
-	f("22697:10001", []string{"22697:10001"})
-	f("22697:10001,22697:10002", []string{"22697:10001", "22697:10002"})
+	f("0", []uint32{uint32(0)})
+	f("4294967295", []uint32{uint32(4294967295)})
+	f("22697:10001", []uint32{(uint32(22697)<<16 | uint32(10001))})
+	f("22697:10001,22697:10002", []uint32{(uint32(22697)<<16 | uint32(10001)), (uint32(22697)<<16 | uint32(10002))})
 }
 
 func TestParseBgpCommunities_Error(t *testing.T) {
@@ -65,11 +65,12 @@ func TestParseBgpCommunities_Error(t *testing.T) {
 
 		comms, err := ParseBgpCommunities(bgpCommString)
 		require.Error(t, err)
-		require.Equal(t, []string{}, comms)
+		require.Equal(t, []uint32{}, comms)
 	}
 	f("")
 	f("-1")
 	f("foo")
 	f("4294967296")
+	f("22697:10001:10002")
 	f("22697:10001,22697:4294967296")
 }

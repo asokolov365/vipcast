@@ -53,12 +53,18 @@ func Storage() *monStorage {
 	return storage
 }
 
-func (s *monStorage) AddOne(m Monitor) {
+func (s *monStorage) AddOne(newMon Monitor) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 
+	if oldMon, exist := s.monitors[newMon.VipAddress()]; exist {
+		// Don't replace Administratively registered Monitors
+		if oldMon.Registrar() == Admin && newMon.Registrar() != Admin {
+			return
+		}
+	}
 	// delete(s.monitors, m.VipAddress())
-	s.monitors[m.VipAddress()] = m
+	s.monitors[newMon.VipAddress()] = newMon
 }
 
 func (s *monStorage) RemoveOne(vip string) {
@@ -68,15 +74,17 @@ func (s *monStorage) RemoveOne(vip string) {
 	delete(s.monitors, vip)
 }
 
+// Update updates storage in batch mode. See also AddOne.
 func (s *monStorage) Update(batch map[string]Monitor) {
 	startTime := time.Now()
 	s.lock.Lock()
 	defer s.lock.Unlock()
 
-	// Find Monitors that are not in this batch
+	// Find Monitors that are not in this batch.
+	// Administratively registered Monitors will not be removed.
 	toRemove := make(map[string]struct{}, len(s.monitors))
-	for vip := range s.monitors {
-		if _, ok := batch[vip]; !ok {
+	for vip, oldMon := range s.monitors {
+		if _, ok := batch[vip]; !ok && oldMon.Registrar() != Admin {
 			toRemove[vip] = struct{}{}
 		}
 	}
@@ -88,10 +96,15 @@ func (s *monStorage) Update(batch map[string]Monitor) {
 
 	addedCount := 0
 
-	// Add Monitors that are in this batch keeping maintenance status
+	// Add Monitors that are in this batch
+	// keeping maintenance and registrar info
 	for _, newMon := range batch {
-		oldMon, existing := s.monitors[newMon.VipAddress()]
-		if existing {
+		if oldMon, exist := s.monitors[newMon.VipAddress()]; exist {
+			// Don't replace Administratively registered Monitors
+			if oldMon.Registrar() == Admin {
+				continue
+			}
+			// Otherwise inherit the Maintenance status from the old Monitor
 			newMon.SetMaintenance(oldMon.IsUnderMaintenance())
 
 		} else {

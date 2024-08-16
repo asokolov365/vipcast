@@ -65,7 +65,6 @@ func (d *Discovery) findClients(ctx context.Context) error {
 
 	services, err := consul.ApiClient().NodeServicesByTags(ctx, *d.consulConfig.ClientSDTags)
 	if err != nil {
-		// logger.Error().Err(err).Msgf("unable to get Consul Catalog from %q", *d.consulConfig.HttpAddr)
 		return err
 	}
 	discoveredClients := make(map[string]monitor.Monitor, len(services))
@@ -142,38 +141,28 @@ func (d *Discovery) DiscoverClients(ctx context.Context) {
 	logger.Info().Str("interval", fmt.Sprintf("%ds", *d.consulConfig.ClientSDInterval)).
 		Msgf("starting Consul service discovery at %s", *d.consulConfig.HttpAddr)
 
+	timeout := time.Second * 5
 	// Start immediately, then loop with ticker
-	errCh := make(chan error, 1)
-	go func() { errCh <- d.findClients(ctx) }()
-	select {
-	case <-ctx.Done():
-		<-errCh // Wait for findClients to return.
-		logger.Info().Msgf("stopping Consul service discovery at %s", *d.consulConfig.HttpAddr)
-		return
-	case err := <-errCh:
-		logger.Error().Err(err).Msg("findClients error")
-	default:
+	timeoutCtx, timeoutCtxCancel := context.WithTimeout(ctx, timeout)
+	if err := d.findClients(timeoutCtx); err != nil {
+		// Error from Consul, or context timeout:
+		logger.Error().Err(err).Send()
 	}
+	timeoutCtxCancel()
 
 	for {
 		select {
 		case <-ticker.C:
-			errCh := make(chan error, 1)
 			go func() {
 				jitterMs := fastrand.Uint32n(jitterMaxMs)
 				time.Sleep(time.Duration(jitterMs) * time.Millisecond)
-
-				errCh <- d.findClients(ctx)
+				timeoutCtx, timeoutCtxCancel := context.WithTimeout(ctx, timeout)
+				if err := d.findClients(timeoutCtx); err != nil {
+					// Error from Consul, or context timeout:
+					logger.Error().Err(err).Send()
+				}
+				timeoutCtxCancel()
 			}()
-			select {
-			case <-ctx.Done():
-				<-errCh // Wait for findClients to return.
-				logger.Info().Msgf("stopping Consul service discovery at %s", *d.consulConfig.HttpAddr)
-				return
-			case err := <-errCh:
-				logger.Error().Err(err).Msg("findClients error")
-			default:
-			}
 
 		case <-ctx.Done():
 			logger.Info().Msgf("stopping Consul service discovery at %s", *d.consulConfig.HttpAddr)

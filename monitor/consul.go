@@ -20,6 +20,7 @@ import (
 	"sync"
 
 	"github.com/asokolov365/vipcast/lib/consul"
+	"github.com/asokolov365/vipcast/route"
 )
 
 // ConsulMonitor implements Monitor interface,
@@ -31,12 +32,7 @@ type ConsulMonitor struct {
 func NewConsulMonitor(serviceName, vipAddress, bgpCommString string,
 	registrar Registrar) (*ConsulMonitor, error) {
 
-	vip, err := ParseVIP(vipAddress)
-	if err != nil {
-		return nil, err
-	}
-
-	bgpCommunities, err := ParseBgpCommunities(bgpCommString)
+	route, err := route.New(vipAddress, bgpCommString)
 	if err != nil {
 		return nil, err
 	}
@@ -46,24 +42,27 @@ func NewConsulMonitor(serviceName, vipAddress, bgpCommString string,
 			lock:         sync.Mutex{},
 			serviceName:  serviceName,
 			registrar:    registrar,
-			vipInfo:      &vipInfo{address: vip, bgpCommunities: bgpCommunities},
+			route:        route,
 			maintenance:  false,
-			healthStatus: Undefined,
+			healthStatus: HealthUndefined,
 		},
 	}, nil
 }
 
-// IsHealthy implements Monitor interface IsHealthy()
-func (m *ConsulMonitor) IsHealthy(ctx context.Context) bool {
+// CheckHealth implements Monitor interface CheckHealth()
+func (m *ConsulMonitor) CheckHealth(ctx context.Context) HealthStatus {
 	status, err := consul.ApiClient().ServiceHealthStatus(ctx, m.serviceName)
-	// check if error is context cancelled
 	if err != nil {
 		logger.Error().Err(err).
-			Str("vip", m.vipInfo.address).
+			Str("vip", m.route.Prefix().String()).
 			Str("service", m.serviceName).
 			Send()
+		return HealthUndefined
 	}
-	return status == "passing"
+	if status == "passing" {
+		return Healthy
+	}
+	return NotHealthy
 }
 
 // Type implements Monitor interface Type()
