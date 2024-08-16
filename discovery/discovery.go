@@ -26,6 +26,7 @@ import (
 	"github.com/asokolov365/vipcast/lib/consul"
 	"github.com/asokolov365/vipcast/lib/logging"
 	"github.com/asokolov365/vipcast/monitor"
+	"github.com/hashicorp/consul/api"
 	"github.com/rs/zerolog"
 	"github.com/valyala/fastrand"
 )
@@ -34,7 +35,8 @@ var logger *zerolog.Logger
 
 // Metrics
 var (
-	consulAgentDuration = metrics.NewHistogram(`vipcast_consul_interaction_duration_seconds{action="clients-discovery"}`)
+	consulAgentDuration   = metrics.NewHistogram(`vipcast_consul_interaction_duration_seconds{action="clients-discovery"}`)
+	consulCatalogDuration = metrics.NewHistogram(`vipcast_consul_interaction_duration_seconds{action="neighbors-discovery"}`)
 )
 
 func Init() {
@@ -119,16 +121,41 @@ func (d *Discovery) findClients(ctx context.Context) error {
 	return nil
 }
 
-// HealthCheck checks if the service is healthy (passing)
-// func (c *ConsulApiClient) HealthCheck(ctx context.Context, service string) bool {
-// 	startTime := time.Now()
-// 	defer consulHealthCheckDuration.UpdateDuration(startTime)
+// findNeighbors is used to query for services on a single node.
+//
+// This finds services that match the provided discovery-tags.
+func (d *Discovery) findNeighbors(ctx context.Context) error {
+	startTime := time.Now()
+	defer consulCatalogDuration.UpdateDuration(startTime)
 
-// 	if useLocalAgent {
-// 		return c.localHealthCheck(ctx, service)
-// 	}
-// 	return c.remoteHealthCheck(ctx, service)
-// }
+	neighbors, err := consul.ApiClient().CatalogServiceByName(ctx, *d.consulConfig.ServiceName)
+	if err != nil {
+		return err
+	}
+	discoveredNeighbors := make(map[string]*api.CatalogService, len(neighbors))
+
+	for _, nbr := range neighbors {
+		// Address: IP address of the Consul node on which the service is registered.
+		// ServiceAddress: IP address of the service host — if empty, node address should be used.
+		addr := nbr.ServiceAddress
+		if len(nbr.ServiceAddress) == 0 {
+			addr = nbr.Address
+		}
+		discoveredNeighbors[addr] = nbr
+
+		logger.Debug().
+			Str("address", nbr.ServiceAddress).
+			Int("port", nbr.ServicePort).
+			Msg("found vipcast neighbor")
+	}
+
+	logger.Debug().Msgf("spent %d ms in Consul catalog discovery", time.Since(startTime).Milliseconds())
+
+	// Update Neighbors with what is discovered in this pass
+	Neighbors().Update(discoveredNeighbors)
+
+	return nil
+}
 
 const jitterMaxMs uint32 = 1000
 
@@ -138,7 +165,7 @@ func (d *Discovery) DiscoverClients(ctx context.Context) {
 	defer ticker.Stop()
 
 	logger.Info().Str("interval", fmt.Sprintf("%ds", *d.consulConfig.ClientSDInterval)).
-		Msgf("starting Consul service discovery at %s", *d.consulConfig.HttpAddr)
+		Msgf("starting Consul vipcast Clients discovery at %s", *d.consulConfig.HttpAddr)
 
 	timeout := time.Second * 5
 	// Start immediately, then loop with ticker
@@ -164,9 +191,46 @@ func (d *Discovery) DiscoverClients(ctx context.Context) {
 			}()
 
 		case <-ctx.Done():
-			logger.Info().Msgf("stopping Consul service discovery at %s", *d.consulConfig.HttpAddr)
+			logger.Info().Msgf("stopping Consul vipcast Clients discovery at %s", *d.consulConfig.HttpAddr)
 			return
 		}
 	}
+}
 
+func (d *Discovery) DiscoverNeighbors(ctx context.Context) {
+	poll := time.Duration(*d.consulConfig.ClientSDInterval) * time.Second
+	ticker := time.NewTicker(poll)
+	defer ticker.Stop()
+
+	logger.Info().Str("interval", fmt.Sprintf("%ds", *d.consulConfig.ClientSDInterval)).
+		Msgf("starting Consul vipcast Neighbors discovery at %s", *d.consulConfig.HttpAddr)
+
+	timeout := time.Second * 5
+	// Start immediately, then loop with ticker
+	timeoutCtx, timeoutCtxCancel := context.WithTimeout(ctx, timeout)
+	if err := d.findNeighbors(timeoutCtx); err != nil {
+		// Error from Consul, or context timeout:
+		logger.Error().Err(err).Send()
+	}
+	timeoutCtxCancel()
+
+	for {
+		select {
+		case <-ticker.C:
+			go func() {
+				jitterMs := fastrand.Uint32n(jitterMaxMs)
+				time.Sleep(time.Duration(jitterMs) * time.Millisecond)
+				timeoutCtx, timeoutCtxCancel := context.WithTimeout(ctx, timeout)
+				if err := d.findNeighbors(timeoutCtx); err != nil {
+					// Error from Consul, or context timeout:
+					logger.Error().Err(err).Send()
+				}
+				timeoutCtxCancel()
+			}()
+
+		case <-ctx.Done():
+			logger.Info().Msgf("stopping Consul vipcast Neighbors discovery at %s", *d.consulConfig.HttpAddr)
+			return
+		}
+	}
 }

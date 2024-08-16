@@ -97,9 +97,9 @@ func (job *VipCast) run(ctx context.Context) error {
 	// is Consul enabled?
 	if job.serviceDiscovery != nil {
 		go job.serviceDiscovery.DiscoverClients(ctx)
+		go job.serviceDiscovery.DiscoverNeighbors(ctx)
 	}
 	go job.monitorManager.DoMonitor(ctx)
-	go monitor.Storage().UpdateMetrics(ctx)
 	job.apiServer.Serve(ctx)
 
 	// neighbors, err := job.consulApi.NeighborServiceList(ctx)
