@@ -15,7 +15,6 @@
 package monitor
 
 import (
-	"context"
 	"sync"
 	"time"
 
@@ -104,8 +103,9 @@ func (s *monStorage) Update(batch map[string]Monitor) {
 			if oldMon.Registrar() == Admin {
 				continue
 			}
-			// Otherwise inherit the Maintenance status from the old Monitor
+			// Otherwise inherit the Maintenance and Health status from the old Monitor
 			newMon.SetMaintenance(oldMon.IsUnderMaintenance())
+			newMon.SetHealthStatus(oldMon.HealthStatus())
 
 		} else {
 			addedCount += 1
@@ -162,33 +162,29 @@ func (s *monStorage) GetHealthyServices() []Monitor {
 	return result
 }
 
-func (s *monStorage) UpdateMetrics(ctx context.Context) {
+func (s *monStorage) UpdateMetrics() {
 	ticker := time.NewTicker(time.Duration(5 * time.Second))
 	defer ticker.Stop()
 
-	for {
-		select {
-		case <-ticker.C:
-			underMaintenanceCount := 0
-			healthyCount := 0
-			notHealthyCount := 0
-			for _, m := range s.monitors {
-				switch {
-				case m.IsUnderMaintenance():
-					underMaintenanceCount++
-				case m.HealthStatus() == Healthy:
-					healthyCount++
-				default:
-					notHealthyCount++
-				}
-			}
-			clientVipsEntriesTotal.Set(float64(len(s.monitors)))
-			clientVipsEntriesHealthy.Set(float64(healthyCount))
-			clientVipsEntriesNotHealthy.Set(float64(notHealthyCount))
-			clientVipsEntriesMaintenance.Set(float64(underMaintenanceCount))
+	underMaintenanceCount := 0
+	healthyCount := 0
+	notHealthyCount := 0
 
-		case <-ctx.Done():
-			return
+	s.lock.Lock()
+	for _, m := range s.monitors {
+		switch {
+		case m.IsUnderMaintenance():
+			underMaintenanceCount++
+		case m.HealthStatus() == Healthy:
+			healthyCount++
+		default:
+			notHealthyCount++
 		}
 	}
+	s.lock.Unlock()
+
+	clientVipsEntriesTotal.Set(float64(len(s.monitors)))
+	clientVipsEntriesHealthy.Set(float64(healthyCount))
+	clientVipsEntriesNotHealthy.Set(float64(notHealthyCount))
+	clientVipsEntriesMaintenance.Set(float64(underMaintenanceCount))
 }

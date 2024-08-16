@@ -85,6 +85,9 @@ func (mm *Manager) DoMonitor(ctx context.Context) {
 					}
 				}(client)
 			}
+			// Wait for goroutines to finish and update storage metrics
+			time.Sleep(timeout + time.Millisecond)
+			storage.UpdateMetrics()
 		}
 	}
 }
