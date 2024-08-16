@@ -18,9 +18,16 @@ import (
 	"context"
 	"strings"
 	"sync"
+	"time"
 
+	"github.com/VictoriaMetrics/metrics"
 	"github.com/asokolov365/vipcast/lib/consul"
 	"github.com/asokolov365/vipcast/route"
+)
+
+// Metrics
+var (
+	consulHealthCheckDuration = metrics.NewHistogram(`vipcast_consul_interaction_duration_seconds{action="client-healthcheck"}`)
 )
 
 // ConsulMonitor implements Monitor interface,
@@ -51,6 +58,9 @@ func NewConsulMonitor(serviceName, vipAddress, bgpCommString string,
 
 // CheckHealth implements Monitor interface CheckHealth()
 func (m *ConsulMonitor) CheckHealth(ctx context.Context) HealthStatus {
+	startTime := time.Now()
+	defer consulHealthCheckDuration.UpdateDuration(startTime)
+
 	status, err := consul.ApiClient().ServiceHealthStatus(ctx, m.serviceName)
 	if err != nil {
 		logger.Error().Err(err).

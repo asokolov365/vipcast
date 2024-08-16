@@ -35,7 +35,6 @@ var logger *zerolog.Logger
 // Metrics
 var (
 	consulAgentDuration = metrics.NewHistogram(`vipcast_consul_interaction_duration_seconds{action="clients-discovery"}`)
-	// consulHealthCheckDuration = metrics.NewHistogram(`vipcast_consul_interaction_duration_seconds{action="client-healthcheck"}`)
 )
 
 func Init() {
