@@ -23,6 +23,7 @@ import (
 
 	"github.com/VictoriaMetrics/metrics"
 	"github.com/asokolov365/vipcast/config"
+	"github.com/asokolov365/vipcast/enum"
 	"github.com/asokolov365/vipcast/lib/consul"
 	"github.com/asokolov365/vipcast/lib/logging"
 	"github.com/asokolov365/vipcast/monitor"
@@ -68,7 +69,7 @@ func (d *Discovery) findClients(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	discoveredClients := make(map[string]monitor.Monitor, len(services))
+	discoveredClients := make(map[string]*monitor.Monitor, len(services))
 
 	for _, service := range services {
 		var (
@@ -96,7 +97,9 @@ func (d *Discovery) findClients(ctx context.Context) error {
 
 		// Only VipAddress is mandatory
 		if len(vipAddress) > 0 {
-			mon, err := monitor.NewMonitor(service.Service, vipAddress, bgpCommString, monitorString, monitor.Discovery)
+			mon, err := monitor.NewMonitor(
+				service.Service, vipAddress, bgpCommString,
+				monitorString, enum.DiscoveryRegistrar)
 			if err != nil {
 				logger.Warn().Err(err).
 					Str("service", mon.Service()).
@@ -116,7 +119,7 @@ func (d *Discovery) findClients(ctx context.Context) error {
 	logger.Debug().Msgf("spent %d ms in Consul service discovery", time.Since(startTime).Milliseconds())
 
 	// Update Monitor storage with what is discovered in this pass
-	monitor.Storage().Update(discoveredClients)
+	monitor.Storage().UpdateDiscoveredMonitors(discoveredClients)
 
 	return nil
 }
@@ -152,7 +155,7 @@ func (d *Discovery) findNeighbors(ctx context.Context) error {
 	logger.Debug().Msgf("spent %d ms in Consul catalog discovery", time.Since(startTime).Milliseconds())
 
 	// Update Neighbors with what is discovered in this pass
-	Neighbors().Update(discoveredNeighbors)
+	Neighbors().UpdateNeighbors(discoveredNeighbors)
 
 	return nil
 }
