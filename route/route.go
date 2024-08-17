@@ -91,7 +91,7 @@ func (c Communities) AsStrings() []string {
 // IPv4: a.b.c.d, a.b.c.d/32
 // IPv6: a.b.c.d.e.f.g.h, a.b.c.d.e.f.g.h/128
 func ParseVIP(vip string) (*net.IPNet, error) {
-	defaultErr := fmt.Errorf("%q is not valid VIP", vip)
+	defaultErr := fmt.Errorf("`%s` is not valid VIP", vip)
 
 	if strings.TrimSpace(vip) == "" {
 		return nil, defaultErr
