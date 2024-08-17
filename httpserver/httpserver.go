@@ -225,7 +225,6 @@ func handlerWrapper(w http.ResponseWriter, r *http.Request, reqHandler RequestHa
 		return
 	case "/robots.txt":
 		// This prevents search engines from indexing contents
-		// See https://github.com/VictoriaMetrics/VictoriaMetrics/issues/4128
 		fmt.Fprintf(w, "User-agent: *\nDisallow: /\n")
 		return
 	default:
@@ -235,6 +234,7 @@ func handlerWrapper(w http.ResponseWriter, r *http.Request, reqHandler RequestHa
 			pprofHandler(r.URL.Path[len("/debug/pprof/"):], w, r)
 			return
 		case strings.HasPrefix(r.URL.Path, "/api/v1/"):
+			h.Set("Content-Type", "application/json; charset=utf-8")
 			apiV1Requests.Inc()
 			apiV1Handler(r.URL.Path[len("/api/v1/"):], w, r)
 			return
@@ -277,12 +277,6 @@ func pprofHandler(profileName string, w http.ResponseWriter, r *http.Request) {
 	default:
 		pprofDefaultRequests.Inc()
 		pprof.Index(w, r)
-	}
-}
-
-func apiV1Handler(endPoint string, w http.ResponseWriter, r *http.Request) {
-	switch endPoint {
-	case "register":
 	}
 }
 
