@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package monitor
+package enum
 
 import "strings"
 
@@ -20,47 +20,47 @@ import "strings"
 type MonitorType int8
 
 const (
-	None MonitorType = iota
-	Consul
-	Port
-	Exec
-	Http
-	Dns
+	NoneMonitor MonitorType = iota
+	ConsulMonitor
+	PortMonitor
+	ExecMonitor
+	HttpMonitor
+	DnsMonitor
 )
 
 // String returns a string representation of the monitor type
 func (t MonitorType) String() string {
 	switch t {
-	case Consul:
+	case ConsulMonitor:
 		return "consul"
-	case Port:
+	case PortMonitor:
 		return "port"
-	case Exec:
+	case ExecMonitor:
 		return "exec"
-	case Http:
+	case HttpMonitor:
 		return "http"
-	case Dns:
+	case DnsMonitor:
 		return "dns"
 	default:
 		return "none"
 	}
 }
 
-func TypeFromString(t string) MonitorType {
+func MonitorTypeFromString(t string) MonitorType {
 	t = strings.ToLower(strings.TrimSpace(t))
 	switch t {
 	case "consul":
-		return Consul
+		return ConsulMonitor
 	case "port":
-		return Port
+		return PortMonitor
 	case "exec":
-		return Exec
+		return ExecMonitor
 	case "http":
-		return Http
+		return HttpMonitor
 	case "dns":
-		return Dns
+		return DnsMonitor
 	default:
-		return None
+		return NoneMonitor
 	}
 }
 
@@ -90,6 +90,26 @@ func (t HealthStatus) String() string {
 type Registrar int8
 
 const (
-	Admin Registrar = iota
-	Discovery
+	AdminRegistrar Registrar = iota
+	DiscoveryRegistrar
 )
+
+type MaintenanceMode int8
+
+const (
+	MaintenanceOff MaintenanceMode = iota
+	MaintenanceOn
+	MaintenanceUndefined
+)
+
+// String returns a string representation of the Health status
+func (m MaintenanceMode) String() string {
+	switch m {
+	case MaintenanceOff:
+		return "off"
+	case MaintenanceOn:
+		return "on"
+	default:
+		return "undefined"
+	}
+}
