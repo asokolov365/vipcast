@@ -22,6 +22,7 @@ import (
 )
 
 var nbrs *neighbors
+var nbrsLock sync.Mutex
 
 // Storage is the storage backend for all known monitors.
 type neighbors struct {
@@ -29,23 +30,21 @@ type neighbors struct {
 	neighbors map[string]*api.CatalogService
 }
 
-func NewNeighbors() *neighbors {
-	return &neighbors{
-		lock:      sync.Mutex{},
-		neighbors: make(map[string]*api.CatalogService, 100),
-	}
-}
-
 // Neighbors returns the storage for all known neighbors.
 func Neighbors() *neighbors {
 	if nbrs == nil {
-		nbrs = NewNeighbors()
+		nbrsLock.Lock()
+		nbrs = &neighbors{
+			lock:      sync.Mutex{},
+			neighbors: make(map[string]*api.CatalogService, 100),
+		}
+		nbrsLock.Unlock()
 	}
 	return nbrs
 }
 
 // Update updates storage in batch mode.
-func (n *neighbors) Update(batch map[string]*api.CatalogService) {
+func (n *neighbors) UpdateNeighbors(batch map[string]*api.CatalogService) {
 	startTime := time.Now()
 	n.lock.Lock()
 	defer n.lock.Unlock()
@@ -77,9 +76,11 @@ func (n *neighbors) Update(batch map[string]*api.CatalogService) {
 		n.neighbors[nbr.Address] = nbr
 	}
 
-	logger.Info().
-		Int("add", addedCount).
-		Int("remove", len(toRemove)).
-		Int("total", len(n.neighbors)).
-		Msgf("spent %d µs in update neighbors", time.Since(startTime).Microseconds())
+	if addedCount > 0 || len(toRemove) > 0 {
+		logger.Info().
+			Int("add", addedCount).
+			Int("remove", len(toRemove)).
+			Int("total", len(n.neighbors)).
+			Msgf("spent %d µs in update neighbors", time.Since(startTime).Microseconds())
+	}
 }
