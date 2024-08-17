@@ -20,6 +20,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/asokolov365/vipcast/enum"
 	"github.com/asokolov365/vipcast/lib/logging"
 	"github.com/asokolov365/vipcast/route"
 	"github.com/rs/zerolog"
@@ -31,88 +32,102 @@ func Init() {
 	if logger == nil {
 		logger = logging.GetSubLogger("monitor")
 	}
-	storage = NewStorage()
 }
 
 // Monitor is an interface which all monitor backends must implement.
-type Monitor interface {
-	// Service Name
-	Service() string
-	// Route returns VIP address and a list of its BGP communities as Route.
-	Route() *route.Route
-	// VipAddress returns VIP address of the service.
-	VipAddress() string
-	// Registrar returns what subsys registered Monitor.
-	Registrar() Registrar
-	// CheckHealth runs health check for the service.
-	CheckHealth(ctx context.Context) HealthStatus
-	// HealthStatus returns last known health status of the service.
-	HealthStatus() HealthStatus
-	// SetHealthStatus sets health status of the service.
-	SetHealthStatus(health HealthStatus)
-	// SetMaintenance sets the maintenance flag for the service.
-	// Services under maintenance will not be monitored and advertised via BGP protocol.
-	SetMaintenance(isMaintenance bool)
-	// IsUnderMaintenance returns true if the service is under maintenance.
-	IsUnderMaintenance() bool
-	// String returns string representation of the service.
-	String() string
-	// Type returns type of the service.
-	Type() MonitorType
+type Monitor struct {
+	lock            sync.Mutex
+	serviceName     string
+	registrar       enum.Registrar
+	route           *route.Route
+	maintenance     bool
+	healthCheckFunc HealthCheckFunc
+	healthStatus    enum.HealthStatus
+	monitorType     enum.MonitorType
+	monitorParams   string
 }
 
-type defaultMonitor struct {
-	lock         sync.Mutex
-	serviceName  string
-	registrar    Registrar
-	route        *route.Route
-	maintenance  bool
-	healthStatus HealthStatus
-}
+type HealthCheckFunc func(m *Monitor, ctx context.Context) enum.HealthStatus
 
-// ServiceName implements Monitor interface ServiceName()
-func (m *defaultMonitor) Service() string { return m.serviceName }
+// Service returns name of the service.
+func (m *Monitor) Service() string { return m.serviceName }
 
-func (m *defaultMonitor) Route() *route.Route { return m.route }
+// Route returns *route.Route object (VIP and VIP's associated BGP communities)
+func (m *Monitor) Route() *route.Route { return m.route }
 
-// VipAddress implements Monitor interface VipAddress()
-func (m *defaultMonitor) VipAddress() string { return m.route.Prefix().String() }
+// VipAddress returns string representation of VIP address of the service.
+func (m *Monitor) VipAddress() string { return m.route.Prefix().String() }
 
-// Registrar implements Monitor interface Registrar()
-func (m *defaultMonitor) Registrar() Registrar { return m.registrar }
+// Registrar returns what subsys has registered Monitor.
+func (m *Monitor) Registrar() enum.Registrar { return m.registrar }
 
-// HealthStatus implements Monitor interface HealthStatus()
-func (m *defaultMonitor) HealthStatus() HealthStatus { return m.healthStatus }
+// HealthStatus returns last known health status of the service.
+func (m *Monitor) HealthStatus() enum.HealthStatus { return m.healthStatus }
 
-// SetHealthStatus implements Monitor interface SetHealthStatus()
-func (m *defaultMonitor) SetHealthStatus(health HealthStatus) {
+// SetHealthStatus sets health status of the service.
+func (m *Monitor) SetHealthStatus(health enum.HealthStatus) {
 	m.lock.Lock()
 	defer m.lock.Unlock()
 
 	m.healthStatus = health
 }
 
-// SetMaintenance implements Monitor interface SetMaintenance()
-func (m *defaultMonitor) SetMaintenance(isMaintenance bool) {
+// SetMaintenance sets the maintenance flag for the service.
+// Services under maintenance will not be monitored and advertised via BGP protocol.
+func (m *Monitor) SetMaintenance(mode enum.MaintenanceMode) {
 	m.lock.Lock()
 	defer m.lock.Unlock()
 
-	m.maintenance = isMaintenance
+	logger.Info().
+		Str("vip", m.VipAddress()).
+		Str("service", m.Service()).
+		Msgf("maintenance mode %s", mode.String())
+	m.maintenance = (mode == enum.MaintenanceOn)
 }
 
-// IsUnderMaintenance implements Monitor interface IsUnderMaintenance()
-func (m *defaultMonitor) IsUnderMaintenance() bool { return m.maintenance }
+// IsUnderMaintenance returns true if the service is under maintenance.
+func (m *Monitor) IsUnderMaintenance() bool { return m.maintenance }
+
+// String returns string representation of the service.
+func (m *Monitor) String() string {
+	str := []string{
+		m.Service(),
+		m.VipAddress(),
+		m.monitorType.String(),
+	}
+	return strings.Join(str, ":")
+}
+
+// Params returns string representation of monitoring parameters.
+func (m *Monitor) Params() string { return m.monitorParams }
+
+// Type returns type of Monitor for the service.
+func (m *Monitor) Type() enum.MonitorType { return m.monitorType }
+
+// Equal returns if Monitor is equal to other Monitor.
+func (m *Monitor) Equal(other *Monitor) bool {
+	if m.monitorType != other.Type() {
+		return false
+	}
+	if !m.route.Equal(other.Route()) {
+		return false
+	}
+	if m.monitorParams != other.Params() {
+		return false
+	}
+	return true
+}
 
 func NewMonitor(serviceName, vipAddress, bgpCommString, monitorString string,
-	registrar Registrar) (Monitor, error) {
+	registrar enum.Registrar) (*Monitor, error) {
 	// valid monitorString formats are:
 	// "port:tcp:123" , "exec:/local/check.sh", "consul", "http://localhost", "dns:type:dname" "none"
 	monitorString = strings.ToLower(strings.TrimSpace(monitorString))
 	parts := strings.Split(monitorString, ":")
-	monType := TypeFromString(parts[0])
+	monType := enum.MonitorTypeFromString(parts[0])
 
 	switch monType {
-	case Consul:
+	case enum.ConsulMonitor:
 		mon, err := NewConsulMonitor(serviceName, vipAddress, bgpCommString, registrar)
 		if err != nil {
 			return nil, err

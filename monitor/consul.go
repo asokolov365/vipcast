@@ -16,11 +16,11 @@ package monitor
 
 import (
 	"context"
-	"strings"
 	"sync"
 	"time"
 
 	"github.com/VictoriaMetrics/metrics"
+	"github.com/asokolov365/vipcast/enum"
 	"github.com/asokolov365/vipcast/lib/consul"
 	"github.com/asokolov365/vipcast/route"
 )
@@ -31,61 +31,40 @@ var (
 )
 
 // ConsulMonitor implements Monitor interface,
-// that checks client service health status via Consul API.
-type ConsulMonitor struct {
-	*defaultMonitor
-}
-
 func NewConsulMonitor(serviceName, vipAddress, bgpCommString string,
-	registrar Registrar) (*ConsulMonitor, error) {
+	registrar enum.Registrar) (*Monitor, error) {
 
 	route, err := route.New(vipAddress, bgpCommString)
 	if err != nil {
 		return nil, err
 	}
 
-	return &ConsulMonitor{
-		&defaultMonitor{
-			lock:         sync.Mutex{},
-			serviceName:  serviceName,
-			registrar:    registrar,
-			route:        route,
-			maintenance:  false,
-			healthStatus: HealthUndefined,
-		},
+	var healthCheckFunc = func(m *Monitor, ctx context.Context) enum.HealthStatus {
+		startTime := time.Now()
+		defer consulHealthCheckDuration.UpdateDuration(startTime)
+
+		status, err := consul.ApiClient().ServiceHealthStatus(ctx, m.Service())
+		if err != nil {
+			logger.Error().Err(err).
+				Str("vip", m.Route().Prefix().String()).
+				Str("service", m.Service()).
+				Send()
+			return enum.HealthUndefined
+		}
+		if status == "passing" {
+			return enum.Healthy
+		}
+		return enum.NotHealthy
+	}
+
+	return &Monitor{
+		lock:            sync.Mutex{},
+		serviceName:     serviceName,
+		registrar:       registrar,
+		route:           route,
+		maintenance:     false,
+		healthStatus:    enum.HealthUndefined,
+		monitorType:     enum.ConsulMonitor,
+		healthCheckFunc: healthCheckFunc,
 	}, nil
-}
-
-// CheckHealth implements Monitor interface CheckHealth()
-func (m *ConsulMonitor) CheckHealth(ctx context.Context) HealthStatus {
-	startTime := time.Now()
-	defer consulHealthCheckDuration.UpdateDuration(startTime)
-
-	status, err := consul.ApiClient().ServiceHealthStatus(ctx, m.serviceName)
-	if err != nil {
-		logger.Error().Err(err).
-			Str("vip", m.route.Prefix().String()).
-			Str("service", m.serviceName).
-			Send()
-		return HealthUndefined
-	}
-	if status == "passing" {
-		return Healthy
-	}
-	return NotHealthy
-}
-
-// Type implements Monitor interface Type()
-func (m *ConsulMonitor) Type() MonitorType {
-	return Consul
-}
-
-// String implements Monitor interface String()
-func (m *ConsulMonitor) String() string {
-	str := []string{
-		m.Service(),
-		m.VipAddress(),
-		Consul.String(),
-	}
-	return strings.Join(str, ":")
 }

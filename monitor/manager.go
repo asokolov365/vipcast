@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/asokolov365/vipcast/enum"
 	"github.com/valyala/fastrand"
 )
 
@@ -57,7 +58,7 @@ func (mm *Manager) DoMonitor(ctx context.Context) {
 				logger.Debug().Msg("no clients for service monitoring")
 			}
 			for _, client := range clients {
-				go func(m Monitor) {
+				go func(m *Monitor) {
 					log := logger.With().
 						Str("vip", m.VipAddress()).
 						Str("service", m.Service()).
@@ -72,12 +73,13 @@ func (mm *Manager) DoMonitor(ctx context.Context) {
 						return
 					default:
 						timeoutCtx, timeoutCtxCancel := context.WithTimeout(ctx, timeout)
-						health := m.CheckHealth(timeoutCtx)
+						health := m.healthCheckFunc(m, timeoutCtx)
+						// health := m.CheckHealth(timeoutCtx)
 						m.SetHealthStatus(health)
 						switch health {
-						case Healthy:
+						case enum.Healthy:
 							log.Debug().Str("monitor", m.Type().String()).Msg("service is healthy")
-						case NotHealthy:
+						case enum.NotHealthy:
 							log.Warn().Str("monitor", m.Type().String()).Msg("service is not healthy")
 						}
 						timeoutCtxCancel()

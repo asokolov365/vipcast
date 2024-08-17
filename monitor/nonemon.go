@@ -16,50 +16,32 @@ package monitor
 
 import (
 	"context"
-	"strings"
 	"sync"
 
+	"github.com/asokolov365/vipcast/enum"
 	"github.com/asokolov365/vipcast/route"
 )
 
 // NoneMonitor implements Monitor interface,
-// that doesn't checks client service health status.
-type NoneMonitor struct {
-	*defaultMonitor
-}
-
 func NewNoneMonitor(serviceName, vipAddress, bgpCommString string,
-	registrar Registrar) (*NoneMonitor, error) {
+	registrar enum.Registrar) (*Monitor, error) {
 
 	route, err := route.New(vipAddress, bgpCommString)
 	if err != nil {
 		return nil, err
 	}
 
-	return &NoneMonitor{
-		&defaultMonitor{
-			lock:         sync.Mutex{},
-			serviceName:  serviceName,
-			registrar:    registrar,
-			route:        route,
-			maintenance:  false,
-			healthStatus: Healthy,
-		},
-	}, nil
-}
-
-// NoneMonitor always returns true (is healthy)
-func (m *NoneMonitor) CheckHealth(ctx context.Context) HealthStatus { return Healthy }
-
-// Type implements Monitor interface Type()
-func (m *NoneMonitor) Type() MonitorType { return None }
-
-// String implements Monitor interface String()
-func (m *NoneMonitor) String() string {
-	str := []string{
-		m.Service(),
-		m.VipAddress(),
-		None.String(),
+	var healthCheckFunc = func(m *Monitor, ctx context.Context) enum.HealthStatus {
+		return enum.Healthy
 	}
-	return strings.Join(str, ":")
+	return &Monitor{
+		lock:            sync.Mutex{},
+		serviceName:     serviceName,
+		registrar:       registrar,
+		route:           route,
+		maintenance:     false,
+		healthStatus:    enum.Healthy,
+		monitorType:     enum.NoneMonitor,
+		healthCheckFunc: healthCheckFunc,
+	}, nil
 }
