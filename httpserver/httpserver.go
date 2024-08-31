@@ -23,7 +23,6 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"net/http/pprof"
 	"os"
 	"runtime"
 	"strconv"
@@ -50,14 +49,6 @@ func Init() {
 
 var (
 	metricsRequests          = metrics.NewCounter(`vipcast_http_requests_total{path="/metrics"}`)
-	apiV1Requests            = metrics.NewCounter(`vipcast_http_requests_total{path="/api/v1/"}`)
-	pprofRequests            = metrics.NewCounter(`vipcast_http_requests_total{path="/debug/pprof/"}`)
-	pprofCmdlineRequests     = metrics.NewCounter(`vipcast_http_requests_total{path="/debug/pprof/cmdline"}`)
-	pprofProfileRequests     = metrics.NewCounter(`vipcast_http_requests_total{path="/debug/pprof/profile"}`)
-	pprofSymbolRequests      = metrics.NewCounter(`vipcast_http_requests_total{path="/debug/pprof/symbol"}`)
-	pprofTraceRequests       = metrics.NewCounter(`vipcast_http_requests_total{path="/debug/pprof/trace"}`)
-	pprofMutexRequests       = metrics.NewCounter(`vipcast_http_requests_total{path="/debug/pprof/mutex"}`)
-	pprofDefaultRequests     = metrics.NewCounter(`vipcast_http_requests_total{path="/debug/pprof/default"}`)
 	faviconRequests          = metrics.NewCounter(`vipcast_http_requests_total{path="*/favicon.ico"}`)
 	requestsTotal            = metrics.NewCounter(`vipcast_http_requests_all_total`)
 	unsupportedRequestErrors = metrics.NewCounter(`vipcast_http_request_errors_total{path="*", reason="unsupported"}`)
@@ -82,10 +73,9 @@ type RequestHandler func(w http.ResponseWriter, r *http.Request) bool
 
 type Server struct {
 	listenAddr string
-	reqHandler RequestHandler
 }
 
-func NewServer(addr string, rh RequestHandler) *Server {
+func NewServer(addr string) *Server {
 	var listenAddr string
 	if addr == "" {
 		listenAddr = "127.0.0.1:8179"
@@ -96,20 +86,13 @@ func NewServer(addr string, rh RequestHandler) *Server {
 	}
 	return &Server{
 		listenAddr: listenAddr,
-		reqHandler: rh,
 	}
 }
 
 func (s *Server) Serve(ctx context.Context) {
-	if s.reqHandler == nil {
-		s.reqHandler = func(w http.ResponseWriter, r *http.Request) bool {
-			return false
-		}
-	}
-
 	srv := &http.Server{
 		Addr:              s.listenAddr,
-		Handler:           gzipHandler(s.reqHandler),
+		Handler:           gzipHandler(apiV1Handler),
 		ReadHeaderTimeout: 5 * time.Second,
 		IdleTimeout:       idleConnTimeout,
 		// Do not set ReadTimeout and WriteTimeout here,
@@ -206,7 +189,7 @@ func handlerWrapper(w http.ResponseWriter, r *http.Request, reqHandler RequestHa
 		h.Set("Connection", "close")
 	}
 	if strings.HasSuffix(r.URL.Path, "/favicon.ico") {
-		w.Header().Set("Cache-Control", "max-age=3600")
+		h.Set("Cache-Control", "max-age=3600")
 		faviconRequests.Inc()
 		w.Write(faviconData)
 		return
@@ -228,15 +211,8 @@ func handlerWrapper(w http.ResponseWriter, r *http.Request, reqHandler RequestHa
 		fmt.Fprintf(w, "User-agent: *\nDisallow: /\n")
 		return
 	default:
-		switch {
-		case strings.HasPrefix(r.URL.Path, "/debug/pprof/"):
-			pprofRequests.Inc()
+		if strings.HasPrefix(r.URL.Path, "/debug/pprof/") {
 			pprofHandler(r.URL.Path[len("/debug/pprof/"):], w, r)
-			return
-		case strings.HasPrefix(r.URL.Path, "/api/v1/"):
-			h.Set("Content-Type", "application/json; charset=utf-8")
-			apiV1Requests.Inc()
-			apiV1Handler(r.URL.Path[len("/api/v1/"):], w, r)
 			return
 		}
 		if reqHandler(w, r) {
@@ -246,37 +222,6 @@ func handlerWrapper(w http.ResponseWriter, r *http.Request, reqHandler RequestHa
 		Errorf(w, r, "unsupported path requested: %q", r.URL.Path)
 		unsupportedRequestErrors.Inc()
 		return
-	}
-}
-
-func pprofHandler(profileName string, w http.ResponseWriter, r *http.Request) {
-	// This switch has been stolen from init func at https://golang.org/src/net/http/pprof/pprof.go
-	switch profileName {
-	case "cmdline":
-		pprofCmdlineRequests.Inc()
-		pprof.Cmdline(w, r)
-	case "profile":
-		pprofProfileRequests.Inc()
-		pprof.Profile(w, r)
-	case "symbol":
-		pprofSymbolRequests.Inc()
-		pprof.Symbol(w, r)
-	case "trace":
-		pprofTraceRequests.Inc()
-		pprof.Trace(w, r)
-	case "mutex":
-		pprofMutexRequests.Inc()
-		seconds, _ := strconv.Atoi(r.FormValue("seconds"))
-		if seconds <= 0 {
-			seconds = 10
-		}
-		prev := runtime.SetMutexProfileFraction(10)
-		time.Sleep(time.Duration(seconds) * time.Second)
-		pprof.Index(w, r)
-		runtime.SetMutexProfileFraction(prev)
-	default:
-		pprofDefaultRequests.Inc()
-		pprof.Index(w, r)
 	}
 }
 

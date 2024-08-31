@@ -15,23 +15,66 @@
 package httpserver
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 
+	"github.com/VictoriaMetrics/metrics"
 	"github.com/asokolov365/vipcast/enum"
+	"github.com/asokolov365/vipcast/maintenance"
 	"github.com/asokolov365/vipcast/monitor"
+	"github.com/asokolov365/vipcast/registry"
+	"github.com/asokolov365/vipcast/route"
 	"github.com/rs/zerolog"
 )
 
-func apiV1Handler(endPoint string, w http.ResponseWriter, r *http.Request) {
-	switch endPoint {
-	case "register":
-		apiV1Register(w, r)
-	case "unregister":
-		apiV1Unregister(w, r)
-	case "maintenance":
-		apiV1Maintenance(w, r)
+var (
+	apiV1Requests = metrics.NewCounter(`vipcast_http_requests_total{path="/api/v1/"}`)
+)
+
+func apiV1Handler(w http.ResponseWriter, r *http.Request) bool {
+	if r.URL.Path == "/" {
+		if r.Method != http.MethodGet {
+			return false
+		}
+		w.Header().Add("Content-Type", "text/html; charset=utf-8")
+		fmt.Fprintf(w, "<h2>vipcast</h2>")
+		fmt.Fprintf(w, "See docs at <a href='https://github.com/asokolov365/vipcast/blob/main/README.md'>https://github.com/asokolov365/vipcast</a></br>")
+		fmt.Fprintf(w, "Useful endpoints:</br>")
+		WriteAPIHelp(w, [][2]string{
+			{registry.ApiPath, "advanced information about discovered VIPs in JSON format"},
+			{maintenance.ApiPath, "maintenance status for discovered active VIPs"},
+			{"metrics", "available service metrics"},
+		})
+		return true
+	}
+
+	path := strings.Replace(r.URL.Path, "//", "/", -1)
+
+	if !strings.HasPrefix(path, "/api/v1/") {
+		return false
+	}
+
+	apiV1Requests.Inc()
+
+	switch path {
+	case registry.ApiPath:
+		if err := apiV1Registry(w, r); err != nil {
+			Errorf(w, r, "%s", err)
+			return true
+		}
+		return true
+	case maintenance.ApiPath:
+		if err := apiV1Maintenance(w, r); err != nil {
+			Errorf(w, r, "%s", err)
+			return true
+		}
+		return true
+
+	default:
+		return false
 	}
 }
 
@@ -57,7 +100,7 @@ func apiV1Register(w http.ResponseWriter, r *http.Request) {
 			monitorString = values[0]
 		}
 	}
-	// VipAddress and monitor monitorString are mandatory
+	// vipAddress and monitorString are mandatory
 	if strings.TrimSpace(vipAddress) == "" {
 		w.WriteHeader(http.StatusBadRequest)
 		httpLog.Error().
@@ -84,7 +127,12 @@ func apiV1Register(w http.ResponseWriter, r *http.Request) {
 	var err error
 	switch {
 	case strings.TrimSpace(monitorString) == "consul":
-		m, err = monitor.NewConsulMonitor(serviceName, vipAddress, bgpCommString, enum.AdminRegistrar)
+		w.WriteHeader(http.StatusBadRequest)
+		httpLog.Error().
+			Int("status", http.StatusBadRequest).
+			Str("error", "Bad Request").
+			Msg("vipcast_monitor=consul is not supported, please use consul tags instead")
+		return
 	default:
 		m, err = monitor.NewNoneMonitor(serviceName, vipAddress, bgpCommString, enum.AdminRegistrar)
 	}
@@ -105,9 +153,7 @@ func apiV1Register(w http.ResponseWriter, r *http.Request) {
 func apiV1Unregister(w http.ResponseWriter, r *http.Request) {
 	log := logger.With().Str("path", "/unregister").Logger()
 	httpLog := zerolog.New(w)
-	var (
-		vipAddress string
-	)
+	var vipAddress string
 	params := r.URL.Query()
 	for k, values := range params {
 		switch k {
@@ -137,51 +183,184 @@ func apiV1Unregister(w http.ResponseWriter, r *http.Request) {
 		Msg("removing service from vipcast")
 }
 
-func apiV1Maintenance(w http.ResponseWriter, r *http.Request) {
-	log := logger.With().Str("path", "/maintenance").Logger()
-	httpLog := zerolog.New(w)
-	var (
-		vipAddress string
-		mode       enum.MaintenanceMode = 2
-	)
-	params := r.URL.Query()
-	for k, values := range params {
-		switch k {
-		case "vip", "vipcast_vip", "gocast_vip":
-			vipAddress = values[0]
-		case "on", "yes", "true", "enable":
-			mode = enum.MaintenanceOn
-		case "off", "no", "false", "disable":
-			mode = enum.MaintenanceOff
+func apiV1Registry(w http.ResponseWriter, r *http.Request) error {
+	var vipAddress string
+	log := logger.With().Str("path", registry.ApiPath).Logger()
+	vipAddress = strings.TrimSpace(r.URL.Query().Get("vip"))
+
+	if vipAddress != "" {
+		n, err := route.ParseVIP(vipAddress)
+		if err != nil {
+			return err
 		}
-	}
-	// VipAddress is mandatory
-	if strings.TrimSpace(vipAddress) == "" {
-		w.WriteHeader(http.StatusBadRequest)
-		httpLog.Error().
-			Int("status", http.StatusBadRequest).
-			Str("error", "Bad Request").
-			Msg("missing required parameter: 'vipcast_vip'")
-		return
+		vipAddress = n.String()
 	}
 
-	if mode == enum.MaintenanceUndefined {
-		w.WriteHeader(http.StatusBadRequest)
-		httpLog.Error().
-			Int("status", http.StatusBadRequest).
-			Str("error", "Bad Request").
-			Msg("missing required parameter: 'on/off'")
-		return
+	switch r.Method {
+	case http.MethodGet, "": // an empty string means GET
+		var body []byte
+		var err error
+		if vipAddress == "" {
+			if registry.Registry().Len() == 0 {
+				body = []byte("{}")
+				w.WriteHeader(http.StatusNoContent)
+			} else {
+				body, err = registry.Registry().AsJSON()
+				if err != nil {
+					return err
+				}
+			}
+
+		} else {
+			v := registry.Registry().GetVipInfo(vipAddress)
+			if v == nil {
+				body = []byte("{}")
+				w.WriteHeader(http.StatusNotFound)
+			} else {
+				body, err = json.Marshal(v)
+				if err != nil {
+					return err
+				}
+			}
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(body)
+		return nil
+
+	case http.MethodPut:
+		vdb := &registry.VipDatabase{}
+		err := decodeJSONBody(w, r, vdb)
+		if err != nil {
+			return err
+		}
+		for _, v := range vdb.Data {
+			updated, _ := registry.Registry().NotifyVipReporters(v.VipAddress, v.Reporters, v.Generation)
+			if updated {
+				log.Info().Str("vip", v.VipAddress).
+					Strs("reporters", v.Reporters).
+					Msg("vip reporters have been updated")
+			} else {
+				log.Debug().Str("vip", v.VipAddress).
+					Msg("vip reporters are already synchronized")
+				delete(vdb.Data, v.VipAddress)
+			}
+		}
+		body, err := json.MarshalIndent(vdb, "", "  ")
+		if err != nil {
+			return err
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		if len(vdb.Data) == 0 {
+			w.WriteHeader(http.StatusAlreadyReported)
+		} else {
+			w.WriteHeader(http.StatusAccepted)
+		}
+		w.Write(body)
+		return nil
+
+	default:
+		return fmt.Errorf("unsupported method: %s", r.Method)
+	}
+}
+
+func apiV1Maintenance(w http.ResponseWriter, r *http.Request) error {
+	var vipAddress string
+	log := logger.With().Str("path", maintenance.ApiPath).Logger()
+	vipAddress = strings.TrimSpace(r.URL.Query().Get("vip"))
+
+	if vipAddress != "" {
+		n, err := route.ParseVIP(vipAddress)
+		if err != nil {
+			return err
+		}
+		vipAddress = n.String()
 	}
 
-	if err := monitor.Storage().SetMaintenance(vipAddress, mode); err != nil {
-		log.Err(err).Send()
-		w.WriteHeader(http.StatusBadRequest)
-		httpLog.Err(err).Int("status", http.StatusBadRequest).Send()
-		return
+	switch r.Method {
+	case http.MethodGet, "": // an empty string means GET
+		var body []byte
+		var err error
+		if vipAddress == "" {
+			if maintenance.MaintDB().Len() == 0 {
+				body = []byte("{}")
+				w.WriteHeader(http.StatusNoContent)
+			} else {
+				body, err = maintenance.MaintDB().AsJSON()
+				if err != nil {
+					return err
+				}
+			}
+
+		} else {
+			v := maintenance.MaintDB().GetVipInfo(vipAddress)
+			if v == nil {
+				body = []byte("{}")
+				w.WriteHeader(http.StatusNotFound)
+			} else {
+				body, err = json.Marshal(v)
+				if err != nil {
+					return err
+				}
+			}
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(body)
+		return nil
+
+	case http.MethodPost:
+		var v *maintenance.VipInfo
+		v = &maintenance.VipInfo{}
+		err := decodeJSONBody(w, r, v)
+		if err != nil {
+			return err
+		}
+		maintenance.MaintDB().SetVipMaintenance(v.VipAddress, v.IsUnderMaintenance)
+		log.Info().Str("vip", v.VipAddress).Msgf("maintenance set to %v", strconv.FormatBool(v.IsUnderMaintenance))
+
+		v = maintenance.MaintDB().GetVipInfo(v.VipAddress)
+		b, err := json.Marshal(v)
+		if err != nil {
+			return err
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusAccepted)
+		w.Write(b)
+		return nil
+
+	case http.MethodPut:
+		maint := &maintenance.MaintDatabase{}
+		err := decodeJSONBody(w, r, maint)
+		if err != nil {
+			return err
+		}
+		for _, v := range maint.Data {
+			updated, _ := maintenance.MaintDB().NotifyVipMaintenance(v.VipAddress, v.IsUnderMaintenance, v.Generation)
+			if updated {
+				log.Info().Str("vip", v.VipAddress).
+					Msgf("maintenance status updated to %v", strconv.FormatBool(v.IsUnderMaintenance))
+			} else {
+				log.Debug().Str("vip", v.VipAddress).Msg("maintenance status is already reported for vip")
+				delete(maint.Data, v.VipAddress)
+			}
+		}
+		body, err := json.MarshalIndent(maint, "", "  ")
+		if err != nil {
+			return err
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		if len(maint.Data) == 0 {
+			w.WriteHeader(http.StatusAlreadyReported)
+		} else {
+			w.WriteHeader(http.StatusAccepted)
+		}
+		w.Write(body)
+		return nil
+
+	default:
+		return fmt.Errorf("unsupported method: %s", r.Method)
 	}
-	w.WriteHeader(http.StatusOK)
-	httpLog.Info().Int("status", http.StatusOK).
-		Str("vip", vipAddress).
-		Msgf("maintenance mode %s", mode.String())
 }
