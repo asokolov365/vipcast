@@ -36,7 +36,7 @@ var logger *zerolog.Logger
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
 	Use:   "vipcast",
-	Short: "*vipcast* injects client application Virtual IP address via BGP protocol.",
+	Short: "*vipcast* injects client application Virtual IP address (VIP) via BGP protocol.",
 	// Long:  `A longer description that spans multiple lines and likely contains`,
 
 	// examples and usage of using your application. For example:
@@ -73,14 +73,14 @@ var rootCmd = &cobra.Command{
 			return err
 		}
 		logger = logging.GetSubLogger("root")
-		if err = app.Init(); err != nil {
-			return err
-		}
+
+		// Check some config params
 		if *config.AppConfig.Consul.ClientSDInterval < 10 {
 			logger.Warn().Int("interval", *config.AppConfig.Consul.ClientSDInterval).
 				Msg("consul.client-discovery-interval is too short, setting it to 10")
 			*config.AppConfig.Consul.ClientSDInterval = 10
 		}
+
 		if *config.AppConfig.MonitorInterval < 5 {
 			logger.Warn().Int("interval", *config.AppConfig.Consul.ClientSDInterval).
 				Msg("monitor-interval is too short, setting it to 5")
@@ -91,9 +91,17 @@ var rootCmd = &cobra.Command{
 	},
 
 	RunE: func(cmd *cobra.Command, args []string) (err error) {
+		ctx := context.Background()
+		// if name, err := os.Hostname(); err == nil {
+		// 	ctx = context.WithValue(ctx, "hostname", name)
+		// }
 		// Create a context that cancels when OS signals come in.
-		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, os.Kill)
+		ctx, stop := signal.NotifyContext(ctx, os.Interrupt, os.Kill)
 		defer stop()
+
+		if err = app.Init(ctx); err != nil {
+			return err
+		}
 
 		if err := app.Run(ctx); err != nil {
 			return err
@@ -131,7 +139,6 @@ func init() {
 		snakecharmer.WithViper(vpr),
 		snakecharmer.WithResultStruct(config.AppConfig),
 	)
-
 	if err != nil {
 		panic(fmt.Sprintf("error init SnakeCharmer: %s", err.Error()))
 	}
