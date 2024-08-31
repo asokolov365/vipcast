@@ -35,8 +35,18 @@ type Config struct {
 	StateFile       *string        `mapstructure:"state-file,omitempty" env:"VIPCAST_STATE_FILE" usage:"Path to file to store client apps admin state."`
 	MonitorInterval *int           `mapstructure:"monitor-interval,omitempty" env:"VIPCAST_MONITOR_INTERVAL" usage:"Time to wait in seconds between client app healthcheck attempts."`
 	CleanupInterval *int           `mapstructure:"cleanup-interval,omitempty" env:"VIPCAST_CLEANUP_INTERVAL" usage:"Time to wait in seconds between flushing out inactive client apps."`
+	Cluster         *ClusterConfig `mapstructure:"cluster,omitempty"`
 	Consul          *ConsulConfig  `mapstructure:"consul,omitempty"`
 	Logging         *LoggingConfig `mapstructure:"log,omitempty"`
+}
+
+type ClusterConfig struct {
+	BindAddr          *string   `mapstructure:"bind-addr,omitempty" env:"VIPCAST_CLUSTER_ADDR" usage:"The address to bind for vipcast cluster Serf access."`
+	AdvertiseAddr     *string   `mapstructure:"advertise-addr,omitempty" env:"VIPCAST_CLUSTER_ADVERTISE_ADDR" usage:"The address to advertise for vipcast cluster Serf access."`
+	Peers             *[]string `mapstructure:"peers,omitempty" env:"VIPCAST_CLUSTER_PEERS" usage:"List of peers to join to vipcast cluster. list of IP:Port, dns+srv://hostname, consul://vipcast-service-name"`
+	WaitForPeers      *bool     `mapstructure:"wait-for-peers,omitempty" env:"VIPCAST_CLUSTER_WAIT" usage:"This allows to spin up vipcast cluster with no peers available."`
+	InsecureAdvertise *bool     `mapstructure:"insecure-advertise,omitempty" env:"VIPCAST_CLUSTER_INSECURE_ADVERTISE" usage:"This allows to advertise a public IP address to cluster peers."`
+	PeersToNotify     *int      `mapstructure:"peers-to-notify,omitempty" env:"VIPCAST_PEERS_TO_NOTIFY" usage:"How many vipcast cluster nodes to notify gossiping an update."`
 }
 
 type ConsulConfig struct {
@@ -44,7 +54,6 @@ type ConsulConfig struct {
 	HttpToken        *string   `mapstructure:"token,omitempty" env:"CONSUL_HTTP_TOKEN" usage:"The Consul API token (CONSUL_HTTP_TOKEN)."`
 	NodeName         *string   `mapstructure:"node,omitempty" env:"CONSUL_NODE" usage:"Provides access to Node data in Consul (CONSUL_NODE)."`
 	AllowStale       *bool     `mapstructure:"allow-stale,omitempty" env:"CONSUL_ALLOW_STALE" usage:"This allows the Consul agent to service the request from its cache (CONSUL_ALLOW_STALE)."`
-	ServiceName      *string   `mapstructure:"service-name,omitempty" env:"VIPCAST_CONSUL_SERVICE_NAME" usage:"The vipcast service name as it registered in Consul. This used for vipcast neigbors discovery"`
 	ClientSDTags     *[]string `mapstructure:"discovery-tags,omitempty" env:"VIPCAST_CONSUL_CLIENT_SD_TAGS" usage:"Tags to find client apps in Consul."`
 	ClientSDInterval *int      `mapstructure:"discovery-interval,omitempty" env:"VIPCAST_CONSUL_CLIENT_SD_INTERVAL" usage:"Time to wait in seconds between query Consul for new client apps."`
 }
@@ -69,12 +78,18 @@ bind-addr: 127.0.0.1:8179
 state-file: /tmp/vipcast-state.json
 monitor-interval: 5
 cleanup-interval: 600
+cluster:
+  bind-addr: 127.0.0.1:9179
+  advertise-addr: 127.0.0.1:9179
+  peers: [127.0.0.1:9179]
+  wait-for-peers: false
+  insecure-advertise: true
+  peers-to-notify: 2
 consul:
   addr: http://127.0.0.1:8500
   token: ''
   node: ''
   allow-stale: true
-  service-name: vipcast
   discovery-tags: [enable_vipcast]
   discovery-interval: 60
 log:
