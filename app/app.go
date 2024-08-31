@@ -18,13 +18,17 @@ package app
 import (
 	"context"
 	"strings"
+	"time"
 
+	"github.com/asokolov365/vipcast/cluster"
 	"github.com/asokolov365/vipcast/config"
 	"github.com/asokolov365/vipcast/discovery"
 	"github.com/asokolov365/vipcast/httpserver"
 	"github.com/asokolov365/vipcast/lib/consul"
 	"github.com/asokolov365/vipcast/lib/logging"
+	"github.com/asokolov365/vipcast/maintenance"
 	"github.com/asokolov365/vipcast/monitor"
+	"github.com/asokolov365/vipcast/registry"
 	"github.com/hashicorp/consul/api"
 	"github.com/rs/zerolog"
 )
@@ -41,16 +45,21 @@ type VipCast struct {
 }
 
 // Init initializes the vipcast subsystems (httpserver, monitor, bgp, etc).
-func Init() error {
+func Init(ctx context.Context) error {
 	if logger == nil {
 		logger = logging.GetSubLogger("root")
 	}
-	var (
-		serviceDiscovery *discovery.Discovery
-	)
+
+	if err := cluster.Init(ctx, config.AppConfig.Cluster); err != nil {
+		logger.Fatal().Err(err)
+		return err
+	}
 
 	httpserver.Init()
-	apiServer := httpserver.NewServer(*config.AppConfig.BindAddr, nil)
+	apiServer := httpserver.NewServer(*config.AppConfig.BindAddr)
+
+	var serviceDiscovery *discovery.Discovery
+
 	// is Consul SD enabled in config?
 	if strings.HasPrefix(*config.AppConfig.Consul.HttpAddr, "http") {
 		consulApiConfig := api.DefaultConfig()
@@ -92,24 +101,24 @@ func Run(ctx context.Context) error {
 	return vipcast.run(ctx)
 }
 
-func (job *VipCast) run(ctx context.Context) error {
+func (vc *VipCast) run(ctx context.Context) error {
+
+	cluster.Run()
 
 	// is Consul enabled?
-	if job.serviceDiscovery != nil {
-		go job.serviceDiscovery.DiscoverClients(ctx)
-		go job.serviceDiscovery.DiscoverNeighbors(ctx)
+	if vc.serviceDiscovery != nil {
+		go vc.serviceDiscovery.DiscoverClients(ctx)
+		// go job.serviceDiscovery.DiscoverNeighbors(ctx)
 	}
-	go job.monitorManager.DoMonitor(ctx)
-	job.apiServer.Serve(ctx)
+	go vc.monitorManager.DoMonitor(ctx)
+	go registry.Registry().BroadcastRegistry(ctx)
+	go maintenance.MaintDB().BroadcastMaintenance(ctx)
+	go maintenance.MaintDB().Cleanup(ctx, *config.AppConfig.CleanupInterval)
+	vc.apiServer.Serve(ctx)
 
-	// neighbors, err := job.consulApi.NeighborServiceList(ctx)
-	// if err != nil {
-	// 	return err
-	// }
-	// for _, s := range neighbors {
-	// 	fmt.Printf("%s: %s:%d\n", s.Node, s.ServiceAddress, s.ServicePort)
-	// 	fmt.Printf("healthy: %t\n", job.consulApi.HealthCheck(s.ServiceName))
-	// }
+	if err := cluster.GracefulShutdown(5 * time.Second); err != nil {
+		logger.Err(err).Send()
+	}
 
 	select {
 	case <-ctx.Done():
