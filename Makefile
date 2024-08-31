@@ -44,6 +44,8 @@ GO_BUILDER_IMAGE := golang:1.21.6-alpine
 GITHUB_RELEASE_SPEC_FILE="/tmp/vipcast-github-release"
 GITHUB_DEBUG_FILE="/tmp/vipcast-github-debug"
 
+TEST ?= "all"
+
 .PHONY: $(MAKECMDGOALS)
 
 default: all
@@ -59,6 +61,12 @@ build-local: ## Create binary for testing locally - ./build/vipcast
 	# rm needed due to signature caching (https://apple.stackexchange.com/a/428388)
 	rm -f "$(ROOT)/build/$(APP_NAME)-dev"
 	CGO_ENABLED=0 go build -ldflags "$(GO_BUILDINFO)" -tags "osusergo" -o "$(ROOT)/build/$(APP_NAME)-dev" .
+
+integration: build-docker-local ## run integration tests; filter with `TEST=testname make integration`
+	./scripts/test.sh test $(TEST)
+
+build-docker-local: build-linux-amd64-local ## Create docker image for testing locally
+	DOCKER_BUILDKIT=1 docker build -t vipcast:dev .
 
 crossbuild: ## Create cross-platform binaries for testing locally
 	$(MAKE_PARALLEL) crossbuild-local-all
