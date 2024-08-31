@@ -21,8 +21,10 @@ import (
 	"github.com/hashicorp/consul/api"
 )
 
-var nbrs *neighbors
-var nbrsLock sync.Mutex
+var (
+	nbrs     *neighbors
+	nbrsLock sync.Mutex
+)
 
 // Storage is the storage backend for all known monitors.
 type neighbors struct {
