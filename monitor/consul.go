@@ -32,14 +32,14 @@ var (
 
 // ConsulMonitor implements Monitor interface,
 func NewConsulMonitor(serviceName, vipAddress, bgpCommString string,
-	registrar enum.Registrar) (*Monitor, error) {
-
+	registrar enum.Registrar,
+) (*Monitor, error) {
 	route, err := route.New(vipAddress, bgpCommString)
 	if err != nil {
 		return nil, err
 	}
 
-	var healthCheckFunc = func(m *Monitor, ctx context.Context) enum.HealthStatus {
+	healthCheckFunc := func(m *Monitor, ctx context.Context) enum.HealthStatus {
 		startTime := time.Now()
 		defer consulHealthCheckDuration.UpdateDuration(startTime)
 
@@ -62,7 +62,6 @@ func NewConsulMonitor(serviceName, vipAddress, bgpCommString string,
 		serviceName:     serviceName,
 		registrar:       registrar,
 		route:           route,
-		maintenance:     false,
 		healthStatus:    enum.HealthUndefined,
 		monitorType:     enum.ConsulMonitor,
 		healthCheckFunc: healthCheckFunc,

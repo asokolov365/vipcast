@@ -22,6 +22,7 @@ import (
 
 	"github.com/asokolov365/vipcast/enum"
 	"github.com/asokolov365/vipcast/lib/logging"
+	"github.com/asokolov365/vipcast/maintenance"
 	"github.com/asokolov365/vipcast/route"
 	"github.com/rs/zerolog"
 )
@@ -40,7 +41,6 @@ type Monitor struct {
 	serviceName     string
 	registrar       enum.Registrar
 	route           *route.Route
-	maintenance     bool
 	healthCheckFunc HealthCheckFunc
 	healthStatus    enum.HealthStatus
 	monitorType     enum.MonitorType
@@ -72,21 +72,13 @@ func (m *Monitor) SetHealthStatus(health enum.HealthStatus) {
 	m.healthStatus = health
 }
 
-// SetMaintenance sets the maintenance flag for the service.
-// Services under maintenance will not be monitored and advertised via BGP protocol.
-func (m *Monitor) SetMaintenance(mode enum.MaintenanceMode) {
-	m.lock.Lock()
-	defer m.lock.Unlock()
-
-	logger.Info().
-		Str("vip", m.VipAddress()).
-		Str("service", m.Service()).
-		Msgf("maintenance mode %s", mode.String())
-	m.maintenance = (mode == enum.MaintenanceOn)
-}
-
 // IsUnderMaintenance returns true if the service is under maintenance.
-func (m *Monitor) IsUnderMaintenance() bool { return m.maintenance }
+func (m *Monitor) IsUnderMaintenance() bool {
+	if v := maintenance.MaintDB().GetVipInfo(m.VipAddress()); v != nil {
+		return v.IsUnderMaintenance
+	}
+	return false
+}
 
 // String returns string representation of the service.
 func (m *Monitor) String() string {
@@ -119,7 +111,8 @@ func (m *Monitor) Equal(other *Monitor) bool {
 }
 
 func NewMonitor(serviceName, vipAddress, bgpCommString, monitorString string,
-	registrar enum.Registrar) (*Monitor, error) {
+	registrar enum.Registrar,
+) (*Monitor, error) {
 	// valid monitorString formats are:
 	// "port:tcp:123" , "exec:/local/check.sh", "consul", "http://localhost", "dns:type:dname" "none"
 	monitorString = strings.ToLower(strings.TrimSpace(monitorString))

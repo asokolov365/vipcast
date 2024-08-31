@@ -24,14 +24,14 @@ import (
 
 // NoneMonitor implements Monitor interface,
 func NewNoneMonitor(serviceName, vipAddress, bgpCommString string,
-	registrar enum.Registrar) (*Monitor, error) {
-
+	registrar enum.Registrar,
+) (*Monitor, error) {
 	route, err := route.New(vipAddress, bgpCommString)
 	if err != nil {
 		return nil, err
 	}
 
-	var healthCheckFunc = func(m *Monitor, ctx context.Context) enum.HealthStatus {
+	healthCheckFunc := func(m *Monitor, ctx context.Context) enum.HealthStatus {
 		return enum.Healthy
 	}
 	return &Monitor{
@@ -39,7 +39,6 @@ func NewNoneMonitor(serviceName, vipAddress, bgpCommString string,
 		serviceName:     serviceName,
 		registrar:       registrar,
 		route:           route,
-		maintenance:     false,
 		healthStatus:    enum.Healthy,
 		monitorType:     enum.NoneMonitor,
 		healthCheckFunc: healthCheckFunc,
