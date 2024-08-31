@@ -15,72 +15,215 @@
 package maintenance
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
+	"net/http"
 	"sync"
+	"time"
 
-	"github.com/asokolov365/vipcast/config"
-	"github.com/asokolov365/vipcast/enum"
+	"github.com/asokolov365/vipcast/cluster"
 	"github.com/asokolov365/vipcast/lib/logging"
+	"github.com/asokolov365/vipcast/registry"
+	"github.com/asokolov365/vipcast/route"
 	"github.com/rs/zerolog"
+	"github.com/valyala/fastrand"
 )
 
 var logger *zerolog.Logger
 
-var mntDB *Maintenance
-var mntLock sync.Mutex
+const ApiPath = "/api/v1/maintenance"
 
-type Maintenance struct {
-	lock sync.Mutex
-	db   map[string]bool
+var mntDB *MaintDatabase
+
+type VipInfo struct {
+	lock               sync.RWMutex
+	VipAddress         string `json:"vip"`
+	IsUnderMaintenance bool   `json:"maintenance"`
+	Generation         int64  `json:"generation"`
 }
 
-// Storage returns the storage for all known monitors.
-func MntDB() *Maintenance {
+func (v *VipInfo) setMaintenance(isUnderMaintenance bool) {
+	v.lock.Lock()
+	defer v.lock.Unlock()
+	v.IsUnderMaintenance = isUnderMaintenance
+	v.Generation = time.Now().UnixMicro()
+}
+
+// notifyMaintenance updates the maintenance status of the vip
+// only if new Generation is greater than current Generation
+func (v *VipInfo) notifyMaintenance(isUnderMaintenance bool, newGeneration int64) bool {
+	if newGeneration > v.Generation {
+		v.lock.Lock()
+		defer v.lock.Unlock()
+		v.Generation = newGeneration
+		v.IsUnderMaintenance = isUnderMaintenance
+		return true
+	}
+	return false
+}
+
+type MaintDatabase struct {
+	lock sync.RWMutex
+	Data map[string]*VipInfo `json:"data,omitempty"`
+}
+
+// MaintDB returns global VIP Maintenance Database.
+func MaintDB() *MaintDatabase {
 	if mntDB == nil {
 		if logger == nil {
 			logger = logging.GetSubLogger("maintenance")
 		}
-		mntLock.Lock()
-		mntDB = &Maintenance{
-			lock: sync.Mutex{},
-			db:   make(map[string]bool, 100),
+		mntDB = &MaintDatabase{
+			lock: sync.RWMutex{},
+			Data: make(map[string]*VipInfo, 100),
 		}
-		mntLock.Unlock()
 	}
 	return mntDB
 }
 
-// SetMaintenance sets the maintenance flag for the VIP in global Maintenance Database
-func (m *Maintenance) SetMaintenance(vip string, mode enum.MaintenanceMode) {
+func (m *MaintDatabase) GetVipInfo(vip string) *VipInfo {
 	m.lock.Lock()
 	defer m.lock.Unlock()
-	m.db[vip] = (mode == enum.MaintenanceOn)
-
-	// var err error
-	f, err := createOutputFile(*config.AppConfig.StateFile)
-	defer f.Close()
-	if err != nil {
-		logger.Err(err).Send()
-		return
+	v, ok := m.Data[vip]
+	if !ok {
+		return nil
 	}
-	jsonStr, err := json.Marshal(m.db)
-	// err = json.NewEncoder(f).Encode(m.db)
-	if err != nil {
-		logger.Err(err).Send()
-		return
-	}
-	f.Write(jsonStr)
+	return v
 }
 
-func createOutputFile(path string) (*os.File, error) {
-	fileDir := filepath.Dir(path)
+// SetVipMaintenance sets the maintenance flag for the VIP in global VIP Maintenance Database
+func (m *MaintDatabase) SetVipMaintenance(vip string, isUnderMaintenance bool) error {
+	v := m.GetVipInfo(vip)
 
-	if err := os.MkdirAll(fileDir, 0o755); err != nil {
-		return nil, fmt.Errorf("failed to make directory %q: %w", fileDir, err)
+	m.lock.Lock()
+	defer m.lock.Unlock()
+
+	if v == nil {
+		n, err := route.ParseVIP(vip)
+		if err != nil {
+			return err
+		}
+		vip = n.String()
+		v = &VipInfo{VipAddress: vip, lock: sync.RWMutex{}}
 	}
-	os.Remove(path)
-	return os.OpenFile(path, os.O_WRONLY|os.O_CREATE, 0o644) //nolint
+	v.setMaintenance(isUnderMaintenance)
+	m.Data[vip] = v
+	return nil
+}
+
+// NotifyVipMaintenance updates the maintenance status for the vip with newer information.
+// It returns true if the maintenance status has been updated, otherwise false.
+func (m *MaintDatabase) NotifyVipMaintenance(vip string, isUnderMaintenance bool, newGeneration int64) (bool, error) {
+	v := m.GetVipInfo(vip)
+
+	m.lock.Lock()
+	defer m.lock.Unlock()
+
+	if v == nil {
+		n, err := route.ParseVIP(vip)
+		if err != nil {
+			return false, err
+		}
+		vip = n.String()
+		v = &VipInfo{VipAddress: vip, lock: sync.RWMutex{}}
+	}
+	updated := v.notifyMaintenance(isUnderMaintenance, newGeneration)
+	if updated {
+		m.Data[vip] = v
+	}
+
+	return updated, nil
+}
+
+func (m *MaintDatabase) AsJSON() ([]byte, error) {
+	m.lock.Lock()
+	defer m.lock.Unlock()
+
+	b, err := json.MarshalIndent(m, "", "  ")
+	if err != nil {
+		return nil, err
+	}
+	return b, nil
+}
+
+func (m *MaintDatabase) Len() int {
+	// m.lock.Lock()
+	// defer m.lock.Unlock()
+	return len(m.Data)
+}
+
+const jitterMaxMs uint32 = 1000
+
+func (m *MaintDatabase) BroadcastMaintenance(ctx context.Context) {
+	poll := time.Second * 5
+	ticker := time.NewTicker(poll)
+	defer ticker.Stop()
+
+	logger.Info().Str("interval", fmt.Sprintf("%ds", 5)).
+		Msg("starting broadcasting vip maintenance data")
+
+	timeout := time.Second * 2
+
+	for {
+		select {
+		case <-ticker.C:
+			if m.Len() == 0 {
+				logger.Debug().Msg("vip maintenance database is empty, nothing to broadcast")
+				continue
+			}
+			jitterMs := fastrand.Uint32n(jitterMaxMs)
+			time.Sleep(time.Duration(jitterMs) * time.Millisecond)
+			timeoutCtx, timeoutCtxCancel := context.WithTimeout(ctx, timeout)
+			if body, err := m.AsJSON(); err == nil {
+				cluster.VipcastCluster().NotifyCluster(
+					timeoutCtx,
+					http.MethodPut,
+					ApiPath,
+					body,
+				)
+			} else {
+				logger.Err(err).Send()
+			}
+			timeoutCtxCancel()
+
+		case <-ctx.Done():
+			logger.Info().Msg("stopping broadcasting vip maintenance data")
+			return
+		}
+	}
+}
+
+func (m *MaintDatabase) Cleanup(ctx context.Context, interval int) {
+	poll := time.Duration(interval) * time.Second
+	ticker := time.NewTicker(poll)
+	defer ticker.Stop()
+
+	logger.Info().Str("interval", fmt.Sprintf("%ds", interval)).
+		Msg("starting vip maintenance cleanup service")
+
+	for {
+		select {
+		case <-ticker.C:
+			if m.Len() == 0 {
+				logger.Debug().Msg("vip maintenance database is empty, nothing to cleanup")
+				continue
+			}
+			startTime := time.Now()
+			m.lock.RLock()
+			for vip := range m.Data {
+				if _, ok := registry.Registry().Data[vip]; !ok {
+					logger.Info().Str("vip", vip).
+						Msg("removing obsolete vip maintenance data")
+					delete(m.Data, vip)
+				}
+			}
+			m.lock.RUnlock()
+			logger.Info().Msgf("spent %d µs in vip maintenance data cleanup", time.Since(startTime).Microseconds())
+
+		case <-ctx.Done():
+			logger.Info().Msg("stopping vip maintenance cleanup service")
+			return
+		}
+	}
 }
