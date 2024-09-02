@@ -57,7 +57,7 @@ func NewDiscovery() *Discovery {
 	}
 }
 
-// findClients is used to query for services on a single node.
+// findClients is used to query for services on a single Consul node.
 //
 // This finds services that match the provided discovery-tags.
 func (d *Discovery) findClients(ctx context.Context) error {
@@ -71,61 +71,40 @@ func (d *Discovery) findClients(ctx context.Context) error {
 	discoveredClients := make(map[string]*monitor.Monitor, len(services))
 
 	for _, service := range services {
-		var (
-			vipAddress    string
-			bgpCommString string
-			monitorString string
-		)
-
-		for _, tag := range service.Tags {
-			parts := strings.Split(tag, "=")
-			if len(parts) != 2 {
-				continue
-			}
-			switch parts[0] {
-			case "vipcast_vip", "gocast_vip":
-				vipAddress = parts[1]
-
-			case "vipcast_bgp_communities", "gocast_vip_communities":
-				bgpCommString = parts[1]
-
-			case "vipcast_monitor", "gocast_monitor":
-				monitorString = parts[1]
-			}
+		mon, err := monitorFromConsulTags(service.Service, service.Tags)
+		if err != nil {
+			logger.Warn().Err(err).
+				Str("service", service.Service).
+				Msg("unable to create monitor")
+			continue
 		}
 
-		// Only VipAddress is mandatory
-		if len(vipAddress) > 0 {
-			mon, err := monitor.NewMonitor(
-				service.Service, vipAddress, bgpCommString,
-				monitorString, enum.DiscoveryRegistrar)
-			if err != nil {
-				logger.Warn().Err(err).
-					Str("service", mon.Service()).
-					Msg("unable to create monitor")
-				continue
-			}
-			discoveredClients[vipAddress] = mon
-
-			logger.Debug().
+		// Check if multiple services want to use the same VIP
+		if m, ok := discoveredClients[mon.VipAddress()]; ok {
+			logger.Warn().Err(fmt.Errorf("vip is already requested by another service: %s", m.Service())).
 				Str("service", mon.Service()).
 				Str("vip", mon.VipAddress()).
-				Str("monitor", mon.Type().String()).
-				Msg("found service to vipcast")
+				Msg("unable to create monitor")
+			continue
 		}
+
+		discoveredClients[mon.VipAddress()] = mon
+
+		logger.Debug().
+			Str("service", mon.Service()).
+			Str("vip", mon.VipAddress()).
+			Str("monitor", mon.Type().String()).
+			Msg("found service for vipcast")
 	}
 
 	logger.Debug().Msgf("spent %d ms in Consul service discovery", time.Since(startTime).Milliseconds())
 
 	// Update Monitor storage with what is discovered in this pass
-	monitor.Storage().UpdateDiscoveredMonitors(discoveredClients)
+	monitor.Registry().UpdateDiscoveredMonitors(discoveredClients)
 
 	return nil
 }
 
-// findNeighbors is used to query for services on a single node.
-//
-// This finds services that match the provided discovery-tags.
 // func (d *Discovery) findNeighbors(ctx context.Context) error {
 // 	startTime := time.Now()
 // 	defer consulCatalogDuration.UpdateDuration(startTime)
@@ -167,7 +146,7 @@ func (d *Discovery) DiscoverClients(ctx context.Context) {
 	defer ticker.Stop()
 
 	logger.Info().Str("interval", fmt.Sprintf("%ds", *d.consulConfig.ClientSDInterval)).
-		Msgf("starting Consul vipcast Clients discovery at %s", *d.consulConfig.HttpAddr)
+		Msgf("starting Consul vipcast clients discovery at %s", *d.consulConfig.HttpAddr)
 
 	timeout := time.Second * 5
 	// Start immediately, then loop with ticker
@@ -193,7 +172,7 @@ func (d *Discovery) DiscoverClients(ctx context.Context) {
 			}()
 
 		case <-ctx.Done():
-			logger.Info().Msgf("stopping Consul vipcast Clients discovery at %s", *d.consulConfig.HttpAddr)
+			logger.Info().Msgf("stopping Consul vipcast clients discovery at %s", *d.consulConfig.HttpAddr)
 			return
 		}
 	}
@@ -236,3 +215,38 @@ func (d *Discovery) DiscoverClients(ctx context.Context) {
 // 		}
 // 	}
 // }
+
+func monitorFromConsulTags(service string, tags []string) (*monitor.Monitor, error) {
+	var (
+		vipAddress    string
+		bgpCommString string
+		monitorString string
+	)
+
+	for _, tag := range tags {
+		parts := strings.Split(tag, "=")
+		if len(parts) != 2 {
+			continue
+		}
+		switch parts[0] {
+		case "vip", "vipcast_vip", "gocast_vip":
+			vipAddress = strings.TrimSpace(parts[1])
+
+		case "bgp_communities", "vipcast_bgp_communities", "gocast_vip_communities":
+			bgpCommString = strings.TrimSpace(parts[1])
+
+		case "vipcast_monitor", "gocast_monitor":
+			monitorString = strings.TrimSpace(parts[1])
+		}
+	}
+
+	// Only VipAddress is mandatory
+	if len(vipAddress) == 0 {
+		return nil, fmt.Errorf("unable to find VIP in tags of service %s", service)
+	}
+
+	return monitor.NewMonitor(
+		service, vipAddress, bgpCommString,
+		monitorString, enum.DiscoveryRegistrar,
+	)
+}

@@ -26,7 +26,6 @@ import (
 	"github.com/asokolov365/vipcast/httpserver"
 	"github.com/asokolov365/vipcast/lib/consul"
 	"github.com/asokolov365/vipcast/lib/logging"
-	"github.com/asokolov365/vipcast/maintenance"
 	"github.com/asokolov365/vipcast/monitor"
 	"github.com/asokolov365/vipcast/registry"
 	"github.com/hashicorp/consul/api"
@@ -41,7 +40,6 @@ var (
 type VipCast struct {
 	apiServer        *httpserver.Server
 	serviceDiscovery *discovery.Discovery
-	monitorManager   *monitor.Manager
 }
 
 // Init initializes the vipcast subsystems (httpserver, monitor, bgp, etc).
@@ -80,13 +78,11 @@ func Init(ctx context.Context) error {
 		serviceDiscovery = discovery.NewDiscovery()
 	}
 
-	monitor.Init()
-	monitorManager := monitor.NewManager(serviceDiscovery != nil, *config.AppConfig.MonitorInterval)
+	monitor.Init(serviceDiscovery != nil, *config.AppConfig.MonitorInterval)
 
 	vipcast = &VipCast{
 		apiServer:        apiServer,
 		serviceDiscovery: serviceDiscovery,
-		monitorManager:   monitorManager,
 	}
 
 	return nil
@@ -110,10 +106,10 @@ func (vc *VipCast) run(ctx context.Context) error {
 		go vc.serviceDiscovery.DiscoverClients(ctx)
 		// go job.serviceDiscovery.DiscoverNeighbors(ctx)
 	}
-	go vc.monitorManager.DoMonitor(ctx)
+	go monitor.Manager().DoMonitor(ctx)
 	go registry.Registry().BroadcastRegistry(ctx)
-	go maintenance.MaintDB().BroadcastMaintenance(ctx)
-	go maintenance.MaintDB().Cleanup(ctx, *config.AppConfig.CleanupInterval)
+	go registry.Registry().Cleanup(ctx, *config.AppConfig.CleanupInterval)
+
 	vc.apiServer.Serve(ctx)
 
 	if err := cluster.GracefulShutdown(5 * time.Second); err != nil {
