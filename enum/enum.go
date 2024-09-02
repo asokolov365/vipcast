@@ -16,16 +16,22 @@ package enum
 
 import "strings"
 
+const (
+	RegistryApiPath    = "/api/v1/registry"
+	MaintenanceApiPath = "/api/v1/maintenance"
+)
+
 // MonitorType defines monitor types.
 type MonitorType int8
 
 const (
-	NoneMonitor MonitorType = iota
+	ErrorMonitor MonitorType = iota
 	ConsulMonitor
 	PortMonitor
 	ExecMonitor
 	HttpMonitor
 	DnsMonitor
+	NoneMonitor
 )
 
 // String returns a string representation of the monitor type
@@ -41,8 +47,10 @@ func (t MonitorType) String() string {
 		return "http"
 	case DnsMonitor:
 		return "dns"
-	default:
+	case NoneMonitor:
 		return "none"
+	default:
+		return "error"
 	}
 }
 
@@ -59,8 +67,10 @@ func MonitorTypeFromString(t string) MonitorType {
 		return HttpMonitor
 	case "dns":
 		return DnsMonitor
-	default:
+	case "none":
 		return NoneMonitor
+	default:
+		return ErrorMonitor
 	}
 }
 
@@ -77,11 +87,11 @@ const (
 func (t HealthStatus) String() string {
 	switch t {
 	case NotHealthy:
-		return "not healthy"
+		return "service is not healthy"
 	case Healthy:
-		return "healthy"
+		return "service is healthy"
 	default:
-		return "undefined"
+		return "service health is undefined"
 	}
 }
 
