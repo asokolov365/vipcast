@@ -30,7 +30,7 @@ var (
 	consulHealthCheckDuration = metrics.NewHistogram(`vipcast_consul_interaction_duration_seconds{action="client-healthcheck"}`)
 )
 
-// ConsulMonitor implements Monitor interface,
+// NewConsulMonitor returns a new ConsulMonitor with Consul specific healthCheckFunc.
 func NewConsulMonitor(serviceName, vipAddress, bgpCommString string,
 	registrar enum.Registrar,
 ) (*Monitor, error) {
@@ -39,22 +39,18 @@ func NewConsulMonitor(serviceName, vipAddress, bgpCommString string,
 		return nil, err
 	}
 
-	healthCheckFunc := func(m *Monitor, ctx context.Context) enum.HealthStatus {
+	healthCheckFunc := func(m *Monitor, ctx context.Context) (enum.HealthStatus, error) {
 		startTime := time.Now()
 		defer consulHealthCheckDuration.UpdateDuration(startTime)
 
 		status, err := consul.ApiClient().ServiceHealthStatus(ctx, m.Service())
 		if err != nil {
-			logger.Error().Err(err).
-				Str("vip", m.Route().Prefix().String()).
-				Str("service", m.Service()).
-				Send()
-			return enum.HealthUndefined
+			return enum.HealthUndefined, err
 		}
 		if status == "passing" {
-			return enum.Healthy
+			return enum.Healthy, nil
 		}
-		return enum.NotHealthy
+		return enum.NotHealthy, nil
 	}
 
 	return &Monitor{

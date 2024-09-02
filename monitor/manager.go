@@ -19,25 +19,41 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/asokolov365/vipcast/enum"
+	"github.com/VictoriaMetrics/metrics"
 	"github.com/valyala/fastrand"
+	"golang.org/x/sync/errgroup"
 )
 
-type Manager struct {
+var mgr *monitorManager
+
+// Metrics
+var (
+	monitoringCycleDuration = metrics.NewHistogram(`vipcast_monitoring_cycle_duration_seconds`)
+)
+
+type monitorManager struct {
 	consulSDEnabled bool
 	monitorInterval time.Duration
 }
 
-func NewManager(withConsul bool, monitorInterval int) *Manager {
-	return &Manager{
-		consulSDEnabled: withConsul,
+// Registry returns the local Monitor Registry.
+func Manager() *monitorManager {
+	if mgr == nil {
+		panic("BUG: Monitor Manager is not initialized")
+	}
+	return mgr
+}
+
+func newManager(consulSDEnabled bool, monitorInterval int) *monitorManager {
+	return &monitorManager{
+		consulSDEnabled: consulSDEnabled,
 		monitorInterval: time.Duration(monitorInterval) * time.Second,
 	}
 }
 
 const jitterMaxMs uint32 = 1000
 
-func (mm *Manager) DoMonitor(ctx context.Context) {
+func (mm *monitorManager) DoMonitor(ctx context.Context) {
 	ticker := time.NewTicker(mm.monitorInterval)
 	defer ticker.Stop()
 
@@ -48,20 +64,25 @@ func (mm *Manager) DoMonitor(ctx context.Context) {
 
 	for {
 		select {
-		case <-ctx.Done():
-			logger.Info().Msg("stopping service monitoring")
-			return
 		case <-ticker.C:
-			// Get fresh set of MonitorTargets, they might be updated since last time.
-			clients := storage.GetMonitorTargets(mm.consulSDEnabled)
+			startTime := time.Now()
+			logger.Debug().Msgf("running service monitoring cycle")
+
+			// Get fresh set of Monitors, they might be updated since last time.
+			clients := Registry().GetActiveMonitors(mm.consulSDEnabled)
 			if len(clients) == 0 {
 				logger.Debug().Msg("no clients for service monitoring")
 			}
+
+			g, ctx := errgroup.WithContext(ctx)
+
 			for _, client := range clients {
-				go func(m *Monitor) {
+				m := client
+				g.Go(func() error {
 					log := logger.With().
 						Str("vip", m.VipAddress()).
 						Str("service", m.Service()).
+						Str("monitor", m.Type().String()).
 						Logger()
 
 					// Applying jitter to avoid Consul rate limit issues
@@ -70,26 +91,31 @@ func (mm *Manager) DoMonitor(ctx context.Context) {
 
 					select {
 					case <-ctx.Done():
-						return
+						return ctx.Err()
 					default:
 						timeoutCtx, timeoutCtxCancel := context.WithTimeout(ctx, timeout)
-						health := m.healthCheckFunc(m, timeoutCtx)
-						// health := m.CheckHealth(timeoutCtx)
+						defer timeoutCtxCancel()
+						health, err := m.healthCheckFunc(m, timeoutCtx)
 						m.SetHealthStatus(health)
-						switch health {
-						case enum.Healthy:
-							log.Debug().Str("monitor", m.Type().String()).Msg("service is healthy")
-						case enum.NotHealthy:
-							log.Warn().Str("monitor", m.Type().String()).Msg("service is not healthy")
+						if err != nil {
+							log.Err(err).Send()
 						}
-						timeoutCtxCancel()
-						return
+						log.Debug().Msg(health.String())
+						return nil
 					}
-				}(client)
+				})
 			}
-			// Wait for goroutines to finish and update storage metrics
-			time.Sleep(timeout + time.Millisecond)
-			storage.UpdateMetrics()
+			// Wait for goroutines to finish and update metrics
+			err := g.Wait()
+			if err != nil {
+				logger.Err(err).Msg("monitoring goroutine exits with error")
+			}
+			monitoringCycleDuration.UpdateDuration(startTime)
+			Registry().UpdateMetrics()
+
+		case <-ctx.Done():
+			logger.Info().Msg("stopping service monitoring")
+			return
 		}
 	}
 }

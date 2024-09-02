@@ -31,9 +31,10 @@ func NewNoneMonitor(serviceName, vipAddress, bgpCommString string,
 		return nil, err
 	}
 
-	healthCheckFunc := func(m *Monitor, ctx context.Context) enum.HealthStatus {
-		return enum.Healthy
+	healthCheckFunc := func(m *Monitor, ctx context.Context) (enum.HealthStatus, error) {
+		return enum.Healthy, nil
 	}
+
 	return &Monitor{
 		lock:            sync.Mutex{},
 		serviceName:     serviceName,

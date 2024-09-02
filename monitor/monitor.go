@@ -17,25 +17,28 @@ package monitor
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"sync"
 
 	"github.com/asokolov365/vipcast/enum"
 	"github.com/asokolov365/vipcast/lib/logging"
-	"github.com/asokolov365/vipcast/maintenance"
+	"github.com/asokolov365/vipcast/registry"
 	"github.com/asokolov365/vipcast/route"
 	"github.com/rs/zerolog"
 )
 
 var logger *zerolog.Logger
 
-func Init() {
+func Init(consulSDEnabled bool, monitorInterval int) {
 	if logger == nil {
 		logger = logging.GetSubLogger("monitor")
 	}
+	if mgr == nil {
+		mgr = newManager(consulSDEnabled, monitorInterval)
+	}
 }
 
-// Monitor is an interface which all monitor backends must implement.
 type Monitor struct {
 	lock            sync.Mutex
 	serviceName     string
@@ -47,7 +50,7 @@ type Monitor struct {
 	monitorParams   string
 }
 
-type HealthCheckFunc func(m *Monitor, ctx context.Context) enum.HealthStatus
+type HealthCheckFunc func(m *Monitor, ctx context.Context) (enum.HealthStatus, error)
 
 // Service returns name of the service.
 func (m *Monitor) Service() string { return m.serviceName }
@@ -73,8 +76,8 @@ func (m *Monitor) SetHealthStatus(health enum.HealthStatus) {
 }
 
 // IsUnderMaintenance returns true if the service is under maintenance.
-func (m *Monitor) IsUnderMaintenance() bool {
-	if v := maintenance.MaintDB().GetVipInfo(m.VipAddress()); v != nil {
+func (m *Monitor) IsVipUnderMaintenance() bool {
+	if v := registry.Registry().GetVipInfo(m.VipAddress()); v != nil {
 		return v.IsUnderMaintenance
 	}
 	return false
@@ -126,42 +129,44 @@ func NewMonitor(serviceName, vipAddress, bgpCommString, monitorString string,
 			return nil, err
 		}
 		return mon, nil
-	// case strings.HasPrefix(monitorString, "port"):
-	// 	parts := strings.Split(monitorString, ":")
-	// 	if len(parts) != 3 {
-	// 		err := fmt.Errorf("invalid port monitor, must be port:proto:<port>")
-	// 		logger.Error().Err(err).Str("monitor", monitorString).Send()
-	// 		return nil, err
-	// 	}
-	// 	if parts[1] != "tcp" && parts[1] != "udp" {
-	// 		err := fmt.Errorf("invalid port monitor, proto must be tcp or udp")
-	// 		logger.Error().Err(err).Str("monitor", monitorString).Send()
-	// 		return nil, err
-	// 	}
-	// 	mon.Protocol = parts[1]
-	// 	port, err := strconv.ParseUint(parts[2], 10, 16)
-	// 	if err != nil {
-	// 		err := fmt.Errorf("invalid port monitor, port must be uint16")
-	// 		logger.Error().Err(err).Send()
-	// 		return nil, err
-	// 	}
-	// 	mon.Port = int(port)
-	// 	mon.Type = monitor.PortMonitor
+		// case strings.HasPrefix(monitorString, "port"):
+		// 	parts := strings.Split(monitorString, ":")
+		// 	if len(parts) != 3 {
+		// 		err := fmt.Errorf("invalid port monitor, must be port:proto:<port>")
+		// 		logger.Error().Err(err).Str("monitor", monitorString).Send()
+		// 		return nil, err
+		// 	}
+		// 	if parts[1] != "tcp" && parts[1] != "udp" {
+		// 		err := fmt.Errorf("invalid port monitor, proto must be tcp or udp")
+		// 		logger.Error().Err(err).Str("monitor", monitorString).Send()
+		// 		return nil, err
+		// 	}
+		// 	mon.Protocol = parts[1]
+		// 	port, err := strconv.ParseUint(parts[2], 10, 16)
+		// 	if err != nil {
+		// 		err := fmt.Errorf("invalid port monitor, port must be uint16")
+		// 		logger.Error().Err(err).Send()
+		// 		return nil, err
+		// 	}
+		// 	mon.Port = int(port)
+		// 	mon.Type = monitor.PortMonitor
 
-	// case strings.HasPrefix(monitorString, "exec"):
-	// 	parts := strings.Split(monitorString, ":")
-	// 	if len(parts) != 2 {
-	// 		err := fmt.Errorf("invalid exec monitor, must be exec:<command>")
-	// 		logger.Error().Err(err).Str("monitor", monitorString).Send()
-	// 		return nil, err
-	// 	}
-	// 	mon.Command = parts[1]
-	// 	mon.Type = monitor.ExecMonitor
-	default:
+		// case strings.HasPrefix(monitorString, "exec"):
+		// 	parts := strings.Split(monitorString, ":")
+		// 	if len(parts) != 2 {
+		// 		err := fmt.Errorf("invalid exec monitor, must be exec:<command>")
+		// 		logger.Error().Err(err).Str("monitor", monitorString).Send()
+		// 		return nil, err
+		// 	}
+		// 	mon.Command = parts[1]
+		// 	mon.Type = monitor.ExecMonitor
+	case enum.NoneMonitor:
 		mon, err := NewNoneMonitor(serviceName, vipAddress, bgpCommString, registrar)
 		if err != nil {
 			return nil, err
 		}
 		return mon, nil
+	default:
+		return nil, fmt.Errorf("unable to create monitor from `%s`", monitorString)
 	}
 }
