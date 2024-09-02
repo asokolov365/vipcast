@@ -18,12 +18,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"strconv"
 	"strings"
 
 	"github.com/VictoriaMetrics/metrics"
 	"github.com/asokolov365/vipcast/enum"
-	"github.com/asokolov365/vipcast/maintenance"
 	"github.com/asokolov365/vipcast/monitor"
 	"github.com/asokolov365/vipcast/registry"
 	"github.com/asokolov365/vipcast/route"
@@ -44,9 +42,9 @@ func apiV1Handler(w http.ResponseWriter, r *http.Request) bool {
 		fmt.Fprintf(w, "See docs at <a href='https://github.com/asokolov365/vipcast/blob/main/README.md'>https://github.com/asokolov365/vipcast</a></br>")
 		fmt.Fprintf(w, "Useful endpoints:</br>")
 		WriteAPIHelp(w, [][2]string{
-			{registry.ApiPath, "advanced information about discovered VIPs in JSON format"},
-			{maintenance.ApiPath, "maintenance status for discovered active VIPs"},
-			{"metrics", "available service metrics"},
+			{enum.RegistryApiPath, "advanced information about discovered VIPs in JSON format"},
+			{enum.MaintenanceApiPath, "maintenance status for discovered active VIPs"},
+			{"/metrics", "available service metrics"},
 		})
 		return true
 	}
@@ -60,13 +58,13 @@ func apiV1Handler(w http.ResponseWriter, r *http.Request) bool {
 	apiV1Requests.Inc()
 
 	switch path {
-	case registry.ApiPath:
+	case enum.RegistryApiPath:
 		if err := apiV1Registry(w, r); err != nil {
 			Errorf(w, r, "%s", err)
 			return true
 		}
 		return true
-	case maintenance.ApiPath:
+	case enum.MaintenanceApiPath:
 		if err := apiV1Maintenance(w, r); err != nil {
 			Errorf(w, r, "%s", err)
 			return true
@@ -142,7 +140,7 @@ func apiV1Register(w http.ResponseWriter, r *http.Request) {
 		httpLog.Err(err).Int("status", http.StatusBadRequest).Send()
 		return
 	}
-	monitor.Storage().AddMonitor(m)
+	monitor.Registry().AddMonitor(m)
 	w.WriteHeader(http.StatusOK)
 	httpLog.Info().Int("status", http.StatusOK).
 		Str("service", m.Service()).
@@ -171,7 +169,7 @@ func apiV1Unregister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := monitor.Storage().RemoveMonitor(vipAddress); err != nil {
+	if err := monitor.Registry().RemoveMonitor(vipAddress); err != nil {
 		log.Err(err).Send()
 		w.WriteHeader(http.StatusBadRequest)
 		httpLog.Err(err).Int("status", http.StatusBadRequest).Send()
@@ -185,7 +183,7 @@ func apiV1Unregister(w http.ResponseWriter, r *http.Request) {
 
 func apiV1Registry(w http.ResponseWriter, r *http.Request) error {
 	var vipAddress string
-	log := logger.With().Str("path", registry.ApiPath).Logger()
+	log := logger.With().Str("path", enum.RegistryApiPath).Logger()
 	vipAddress = strings.TrimSpace(r.URL.Query().Get("vip"))
 
 	if vipAddress != "" {
@@ -235,14 +233,16 @@ func apiV1Registry(w http.ResponseWriter, r *http.Request) error {
 			return err
 		}
 		for _, v := range vdb.Data {
-			updated, _ := registry.Registry().NotifyVipReporters(v.VipAddress, v.Reporters, v.Generation)
+			updated, _ := registry.Registry().NotifyVipInfoChange(v)
+
 			if updated {
 				log.Info().Str("vip", v.VipAddress).
 					Strs("reporters", v.Reporters).
-					Msg("vip reporters have been updated")
+					Bool("maintenance", v.IsUnderMaintenance).
+					Msg("vip info have been updated")
 			} else {
 				log.Debug().Str("vip", v.VipAddress).
-					Msg("vip reporters are already synchronized")
+					Msg("vip info is already in sync")
 				delete(vdb.Data, v.VipAddress)
 			}
 		}
@@ -266,61 +266,23 @@ func apiV1Registry(w http.ResponseWriter, r *http.Request) error {
 }
 
 func apiV1Maintenance(w http.ResponseWriter, r *http.Request) error {
-	var vipAddress string
-	log := logger.With().Str("path", maintenance.ApiPath).Logger()
-	vipAddress = strings.TrimSpace(r.URL.Query().Get("vip"))
-
-	if vipAddress != "" {
-		n, err := route.ParseVIP(vipAddress)
-		if err != nil {
-			return err
-		}
-		vipAddress = n.String()
-	}
+	log := logger.With().Str("path", enum.MaintenanceApiPath).Logger()
 
 	switch r.Method {
 	case http.MethodGet, "": // an empty string means GET
-		var body []byte
-		var err error
-		if vipAddress == "" {
-			if maintenance.MaintDB().Len() == 0 {
-				body = []byte("{}")
-				w.WriteHeader(http.StatusNoContent)
-			} else {
-				body, err = maintenance.MaintDB().AsJSON()
-				if err != nil {
-					return err
-				}
-			}
-
-		} else {
-			v := maintenance.MaintDB().GetVipInfo(vipAddress)
-			if v == nil {
-				body = []byte("{}")
-				w.WriteHeader(http.StatusNotFound)
-			} else {
-				body, err = json.Marshal(v)
-				if err != nil {
-					return err
-				}
-			}
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		w.Write(body)
-		return nil
+		return apiV1Registry(w, r)
 
 	case http.MethodPost:
-		var v *maintenance.VipInfo
-		v = &maintenance.VipInfo{}
+		v := &registry.VipInfo{}
 		err := decodeJSONBody(w, r, v)
 		if err != nil {
 			return err
 		}
-		maintenance.MaintDB().SetVipMaintenance(v.VipAddress, v.IsUnderMaintenance)
-		log.Info().Str("vip", v.VipAddress).Msgf("maintenance set to %v", strconv.FormatBool(v.IsUnderMaintenance))
+		registry.Registry().SetVipMaintenance(v.VipAddress, v.IsUnderMaintenance)
+		log.Info().Str("vip", v.VipAddress).Bool("maintenance", v.IsUnderMaintenance).
+			Msg("maintenance set")
 
-		v = maintenance.MaintDB().GetVipInfo(v.VipAddress)
+		v = registry.Registry().GetVipInfo(v.VipAddress)
 		b, err := json.Marshal(v)
 		if err != nil {
 			return err
@@ -328,36 +290,6 @@ func apiV1Maintenance(w http.ResponseWriter, r *http.Request) error {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusAccepted)
 		w.Write(b)
-		return nil
-
-	case http.MethodPut:
-		maint := &maintenance.MaintDatabase{}
-		err := decodeJSONBody(w, r, maint)
-		if err != nil {
-			return err
-		}
-		for _, v := range maint.Data {
-			updated, _ := maintenance.MaintDB().NotifyVipMaintenance(v.VipAddress, v.IsUnderMaintenance, v.Generation)
-			if updated {
-				log.Info().Str("vip", v.VipAddress).
-					Msgf("maintenance status updated to %v", strconv.FormatBool(v.IsUnderMaintenance))
-			} else {
-				log.Debug().Str("vip", v.VipAddress).Msg("maintenance status is already reported for vip")
-				delete(maint.Data, v.VipAddress)
-			}
-		}
-		body, err := json.MarshalIndent(maint, "", "  ")
-		if err != nil {
-			return err
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		if len(maint.Data) == 0 {
-			w.WriteHeader(http.StatusAlreadyReported)
-		} else {
-			w.WriteHeader(http.StatusAccepted)
-		}
-		w.Write(body)
 		return nil
 
 	default:
