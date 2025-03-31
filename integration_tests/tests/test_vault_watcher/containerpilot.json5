@@ -1,0 +1,30 @@
+{
+  consul: "consul:8500",
+  vault: {
+      address: "vault:8200",
+      scheme: "http",
+      token: "file:///secrets/vault_token"
+  },
+  logging: {
+    level: "DEBUG",
+    format: "text"
+  },
+  jobs: [
+    {
+      name: "echo-when-secret-changed",
+      when: {
+        source: "watch.secret/data/test",
+        each: "changed"
+      },
+      exec: "echo changed!"
+    }
+  ],
+  watches: [
+    {
+      name: "secret/data/test",
+      source: "vault",
+      tag: "foo",
+      interval: 5
+    }
+  ]
+}

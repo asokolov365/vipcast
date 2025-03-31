@@ -1,0 +1,41 @@
+version: "2.1"
+
+services:
+
+  consul:
+    image: "cpfix_consul"
+    mem_limit: 128m
+    hostname: consul
+    command: agent -dev -client 0.0.0.0 -bind 0.0.0.0
+
+  vault:
+    image: "cpfix_vault"
+    mem_limit: 128m
+    hostname: vault
+    ports:
+      - "127.0.0.1:8200:8200"
+    cap_add:
+      - IPC_LOCK
+    entrypoint: vault server -dev -dev-listen-address=0.0.0.0:8200 -dev-root-token-id=myroot
+
+  app:
+    image: "cpfix_app"
+    mem_limit: 128m
+    links:
+      - consul:consul
+      - vault:vault
+    volumes:
+      - './containerpilot.json5:/etc/containerpilot.json5'
+      - './change-secret.sh:/bin/change-secret.sh:ro'
+      - './vault_token:/secrets/vault_token'
+      - '${CONTAINERPILOT_BIN}:/bin/containerpilot:ro'
+
+  test:
+    image: "cpfix_test_probe"
+    mem_limit: 128m
+    links:
+      - app:app
+      - consul:consul
+      - vault:vault
+    volumes:
+      - '/var/run/docker.sock:/var/run/docker.sock'

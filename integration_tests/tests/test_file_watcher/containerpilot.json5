@@ -1,0 +1,28 @@
+{
+  consul: "consul:8500",
+  logging: {
+    level: "DEBUG",
+    format: "text"
+  },
+  jobs: [
+    {
+      name: "preStart",
+      exec: "/bin/change-file.sh -f /tmp/testFile.txt"
+    },
+    {
+      name: "echo-when-file-changed",
+      when: {
+        source: "watch./tmp/testFile.txt",
+        each: "changed"
+      },
+      exec: "echo changed!"
+    }
+  ],
+  watches: [
+    {
+      name: "/tmp/testFile.txt",
+      source: "file",
+      interval: 5
+    }
+  ]
+}

@@ -1,0 +1,6 @@
+app:
+    image: "cpfix_consul"
+    mem_limit: 128m
+    volumes:
+      - '${CONTAINERPILOT_BIN}:/bin/containerpilot:ro'
+    command: /bin/containerpilot -version

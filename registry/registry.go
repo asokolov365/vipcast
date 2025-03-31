@@ -42,13 +42,26 @@ var (
 	clusterVipsUnderMaintenance = metrics.NewGauge(`vipcast_cluster_vips_entries{status="maintenance"}`, nil)
 )
 
+// Maintenance is a struct that holds the VIP maintenance status.
+type Maintenance struct {
+	lock               sync.Mutex
+	IsUnderMaintenance bool  `json:"enabled"`
+	Generation         int64 `json:"generation"`
+}
+
+// Reporters is a struct that holds the list of cluster members
+// that are advertising the VIP.
+type Reporters struct {
+	lock       sync.Mutex
+	Members    []string `json:"members"`
+	Generation int64    `json:"generation"`
+}
+
 // VipInfo is a struct that holds information about the VIP.
 type VipInfo struct {
-	lock               sync.Mutex
-	VipAddress         string   `json:"vip"`
-	Reporters          []string `json:"reporters"`
-	IsUnderMaintenance bool     `json:"maintenance"`
-	Generation         int64    `json:"generation"`
+	VipAddress  string      `json:"vip"`
+	Reporters   Reporters   `json:"reporters"`
+	Maintenance Maintenance `json:"maintenance"`
 }
 
 func (v *VipInfo) addReporter() {
@@ -56,58 +69,77 @@ func (v *VipInfo) addReporter() {
 		cluster.VipcastCluster().LocalMember().Addr.String(),
 		cluster.VipcastCluster().LocalMember().Port,
 	)
-	v.lock.Lock()
-	defer v.lock.Unlock()
+	v.Reporters.lock.Lock()
+	defer v.Reporters.lock.Unlock()
 	found := false
-	for _, r := range v.Reporters {
+	for _, r := range v.Reporters.Members {
 		if r == reporter {
 			found = true
 			break
 		}
 	}
 	if !found {
-		v.Reporters = append(v.Reporters, reporter)
-		v.Generation = time.Now().UnixMicro()
+		v.Reporters.Members = append(v.Reporters.Members, reporter)
+		v.Reporters.Generation = time.Now().UnixMicro()
 	}
 }
 
 func (v *VipInfo) removeReporter() {
+	if v.Reporters.Members == nil || len(v.Reporters.Members) == 0 {
+		return
+	}
 	reporter := fmt.Sprintf("%s:%d",
 		cluster.VipcastCluster().LocalMember().Addr.String(),
 		cluster.VipcastCluster().LocalMember().Port,
 	)
-	v.lock.Lock()
-	defer v.lock.Unlock()
+	v.Reporters.lock.Lock()
+	defer v.Reporters.lock.Unlock()
 	var i int
-	var r string
-	for i, r = range v.Reporters {
-		if r == reporter {
+	var m string
+	for i, m = range v.Reporters.Members {
+		if m == reporter {
+			v.Reporters.Members = append(v.Reporters.Members[:i], v.Reporters.Members[i+1:]...)
+			v.Reporters.Generation = time.Now().UnixMicro()
 			break
 		}
 	}
-	v.Reporters = append(v.Reporters[:i], v.Reporters[i+1:]...)
-	v.Generation = time.Now().UnixMicro()
 }
 
-func (v *VipInfo) setMaintenance(isUnderMaintenance bool) {
-	v.lock.Lock()
-	defer v.lock.Unlock()
-	v.IsUnderMaintenance = isUnderMaintenance
-	v.Generation = time.Now().UnixMicro()
-}
-
-// notifyInfoChange updates current VIP properties with newer information,
+// notifyReporters updates current VIP reporters list with newer information,
 // but only if new Generation is greater than the current Generation.
-func (v *VipInfo) notifyInfoChange(nvi *VipInfo) bool {
-	if nvi.Generation > v.Generation {
-		v.lock.Lock()
-		defer v.lock.Unlock()
-		v.Generation = nvi.Generation
-		v.Reporters = nvi.Reporters
-		v.IsUnderMaintenance = nvi.IsUnderMaintenance
+func (v *VipInfo) notifyReporters(members []string, newGeneration int64) bool {
+	if newGeneration > v.Reporters.Generation {
+		v.Reporters.lock.Lock()
+		defer v.Reporters.lock.Unlock()
+		v.Reporters.Generation = newGeneration
+		v.Reporters.Members = members
 		return true
 	}
 	return false
+}
+
+func (v *VipInfo) setMaintenance(isUnderMaintenance bool) {
+	v.Maintenance.lock.Lock()
+	defer v.Maintenance.lock.Unlock()
+	v.Maintenance.IsUnderMaintenance = isUnderMaintenance
+	v.Maintenance.Generation = time.Now().UnixMicro()
+}
+
+// notifyMaintenance updates current VIP maintenance status with newer information,
+// but only if new Generation is greater than the current Generation.
+func (v *VipInfo) notifyMaintenance(isUnderMaintenance bool, newGeneration int64) bool {
+	if newGeneration > v.Maintenance.Generation {
+		v.Maintenance.lock.Lock()
+		defer v.Maintenance.lock.Unlock()
+		v.Maintenance.Generation = newGeneration
+		v.Maintenance.IsUnderMaintenance = isUnderMaintenance
+		return true
+	}
+	return false
+}
+
+func (v *VipInfo) IsUnderMaintenance() bool {
+	return v.Maintenance.IsUnderMaintenance
 }
 
 // VipDatabase is the global (cluster wide) VIP Registry.
@@ -160,7 +192,10 @@ func (vdb *VipDatabase) AddVipReporter(vip string) error {
 	defer vdb.lock.Unlock()
 
 	if v == nil {
-		v = &VipInfo{VipAddress: vip, Reporters: []string{}, lock: sync.Mutex{}}
+		v = &VipInfo{
+			VipAddress: vip,
+			Reporters:  Reporters{Members: []string{}, lock: sync.Mutex{}},
+		}
 	}
 	v.addReporter()
 	vdb.Data[vip] = v
@@ -182,7 +217,7 @@ func (vdb *VipDatabase) RemoveVipReporter(vip string) {
 	defer vdb.lock.Unlock()
 
 	v.removeReporter()
-	if len(v.Reporters) == 0 {
+	if len(v.Reporters.Members) == 0 {
 		delete(vdb.Data, vip)
 		return
 	}
@@ -205,7 +240,10 @@ func (vdb *VipDatabase) SetVipMaintenance(vip string, isUnderMaintenance bool) e
 	defer vdb.lock.Unlock()
 
 	if v == nil {
-		v = &VipInfo{VipAddress: vip, Reporters: []string{}, lock: sync.Mutex{}}
+		v = &VipInfo{
+			VipAddress: vip,
+			Reporters:  Reporters{Members: []string{}, lock: sync.Mutex{}},
+		}
 	}
 	v.setMaintenance(isUnderMaintenance)
 	vdb.Data[vip] = v
@@ -233,15 +271,19 @@ func (vdb *VipDatabase) NotifyVipInfoChange(nvi *VipInfo) (bool, error) {
 	defer vdb.lock.Unlock()
 
 	if v == nil {
-		v = &VipInfo{VipAddress: vip, Reporters: []string{}, lock: sync.Mutex{}}
+		v = &VipInfo{
+			VipAddress: vip,
+			Reporters:  Reporters{Members: []string{}, lock: sync.Mutex{}},
+		}
 	}
 
-	updated := v.notifyInfoChange(nvi)
-	if updated {
+	repsUpdated := v.notifyReporters(nvi.Reporters.Members, nvi.Reporters.Generation)
+	mntUpdated := v.notifyMaintenance(nvi.Maintenance.IsUnderMaintenance, nvi.Maintenance.Generation)
+	if repsUpdated || mntUpdated {
 		vdb.Data[vip] = v
 	}
 
-	return updated, nil
+	return repsUpdated || mntUpdated, nil
 }
 
 // AsJSON returns a JSON representation of the global VIP Registry.
@@ -327,7 +369,7 @@ func (vdb *VipDatabase) Cleanup(ctx context.Context, interval int) {
 			// Cleaning up previous toRemove batch
 			for _, vip := range toRemove {
 				if v, ok := vdb.Data[vip]; ok {
-					if len(v.Reporters) == 0 {
+					if len(v.Reporters.Members) == 0 {
 						logger.Info().Str("vip", vip).Msg("removing obsolete vip")
 						delete(vdb.Data, vip)
 					}
@@ -341,7 +383,7 @@ func (vdb *VipDatabase) Cleanup(ctx context.Context, interval int) {
 
 			vdb.lock.RLock()
 			for vip, v := range vdb.Data {
-				if len(v.Reporters) == 0 {
+				if len(v.Reporters.Members) == 0 {
 					logger.Info().Str("vip", vip).Msgf("vip is obsolete and will be removed from registry in %.fs", poll.Seconds())
 					toRemove = append(toRemove, vip)
 				}
@@ -365,7 +407,7 @@ func (vdb *VipDatabase) UpdateMetrics() {
 	defer vdb.lock.RUnlock()
 
 	for _, v := range vdb.Data {
-		if v.IsUnderMaintenance {
+		if v.Maintenance.IsUnderMaintenance {
 			underMaintenanceCount++
 		}
 	}

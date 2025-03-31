@@ -1,0 +1,14 @@
+{
+    "data":{
+        "127.0.0.1/32":{
+            "vip":"127.0.0.1/32",
+            "maintenance":true,
+            "generation":1
+        },
+        "127.0.0.2/32":{
+            "vip":"127.0.0.2/32",
+            "maintenance":true,
+            "generation":1
+        }
+    }
+}

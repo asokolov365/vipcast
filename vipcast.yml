@@ -1,0 +1,31 @@
+bind-addr: 127.0.0.1:8179
+state-file: /tmp/vipcast-state.json
+monitor-interval: 5
+cleanup-interval: 600
+cluster:
+  bind-addr: 127.0.0.1:9179
+  # bind-addr: 192.168.247.227:9179
+  # advertise-addr: 192.168.247.227:9179
+  peers: [127.0.0.1:9179]
+  wait-for-peers: false
+  insecure-advertise: true
+  peers-to-notify: 2
+consul:
+  # addr: ''  # no consul service discovery
+  # addr: http://127.0.0.1:8500  # refused
+  # addr: http://8.8.8.8:8500  # timeout
+  addr: https://chi1-consul.simulprod.com:443  # ok
+  node: chi1-lapp9782
+  allow-stale: false
+  discovery-tags: [enable_vipcast, enable_gocast]
+  discovery-interval: 30
+log:
+  level: info
+  location: true
+  timestamps: false
+  limit:
+    trace: 0
+    debug: 0
+    info: 0
+    warn: 10
+    error: 10

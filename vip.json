@@ -1,0 +1,6 @@
+{
+    "vip":"127.0.0.2/32",
+    "maintenance":{
+        "enabled":true
+    }
+}

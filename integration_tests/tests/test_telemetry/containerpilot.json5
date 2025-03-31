@@ -1,0 +1,46 @@
+{
+  consul: "consul:8500",
+  logging: {
+    level: "DEBUG",
+    format: "text"
+  },
+  jobs: [
+    {
+      name: "app",
+      port: 8000,
+      exec: [
+        "/usr/local/bin/node",
+        "/usr/local/bin/http-server", "/srv", "-p", "8000"],
+      health: {
+        exec: "true",
+        interval: 1,
+        ttl: 5
+      }
+    },
+    {
+      name: "sensor",
+      exec: ["/sensor.sh", "count"],
+      when: {
+        interval: "1s"
+      }
+    }
+  ],
+  watches: [
+    {
+      name: "otherapp",
+      interval: 1
+    }
+  ],
+  telemetry: {
+    port: 9090,
+    metrics: [
+       {
+         namespace: "containerpilot",
+         subsystem: "app",
+         name: "some_counter",
+         help: "help text",
+         type: "counter"
+       }
+    ]
+  }
+}

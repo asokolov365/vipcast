@@ -86,7 +86,7 @@ cluster:
   insecure-advertise: true
   peers-to-notify: 2
 consul:
-  addr: http://127.0.0.1:8500
+  addr: ''
   token: ''
   node: ''
   allow-stale: true

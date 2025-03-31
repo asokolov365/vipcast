@@ -1,0 +1,23 @@
+version: "2.1"
+
+services:
+
+  consul:
+    image: "cpfix_consul"
+    mem_limit: 128m
+    hostname: consul
+    command: agent -dev -client 0.0.0.0 -bind 0.0.0.0
+
+  app:
+    image: "cpfix_app"
+    mem_limit: 128m
+    links:
+      - consul:consul
+    environment:
+      # needs to be in the container already or we'll potentially
+      # error when we try to rewrite it; update in the future
+      # with an env var change to the args instead
+      - CONTAINERPILOT=/etc/containerpilot-with-coprocess.json5
+    volumes:
+      - '${CONTAINERPILOT_BIN}:/bin/containerpilot:ro'
+      - './coprocess.sh:/bin/coprocess.sh'

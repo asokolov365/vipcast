@@ -78,7 +78,7 @@ func (m *Monitor) SetHealthStatus(health enum.HealthStatus) {
 // IsUnderMaintenance returns true if the service is under maintenance.
 func (m *Monitor) IsVipUnderMaintenance() bool {
 	if v := registry.Registry().GetVipInfo(m.VipAddress()); v != nil {
-		return v.IsUnderMaintenance
+		return v.IsUnderMaintenance()
 	}
 	return false
 }

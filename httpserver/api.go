@@ -237,8 +237,8 @@ func apiV1Registry(w http.ResponseWriter, r *http.Request) error {
 
 			if updated {
 				log.Info().Str("vip", v.VipAddress).
-					Strs("reporters", v.Reporters).
-					Bool("maintenance", v.IsUnderMaintenance).
+					Strs("reporters", v.Reporters.Members).
+					Bool("maintenance", v.Maintenance.IsUnderMaintenance).
 					Msg("vip info have been updated")
 			} else {
 				log.Debug().Str("vip", v.VipAddress).
@@ -278,8 +278,8 @@ func apiV1Maintenance(w http.ResponseWriter, r *http.Request) error {
 		if err != nil {
 			return err
 		}
-		registry.Registry().SetVipMaintenance(v.VipAddress, v.IsUnderMaintenance)
-		log.Info().Str("vip", v.VipAddress).Bool("maintenance", v.IsUnderMaintenance).
+		registry.Registry().SetVipMaintenance(v.VipAddress, v.IsUnderMaintenance())
+		log.Info().Str("vip", v.VipAddress).Bool("maintenance", v.IsUnderMaintenance()).
 			Msg("maintenance set")
 
 		v = registry.Registry().GetVipInfo(v.VipAddress)

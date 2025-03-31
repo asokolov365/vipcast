@@ -1,0 +1,52 @@
+{
+  consul: "consul:8500",
+  logging: {
+    level: "DEBUG",
+    format: "text"
+  },
+  // shutdown of ContainerPilot and its tasks happens asynchronously, so we
+  // can't rely on precise counts of task executions unless we constrain the
+  // number of tasks we run and give it plenty of wall-clock time to finish
+  jobs: [
+    {
+      // run a 200ms-long task every 500ms, without a timeout
+      name: "task1",
+      exec: ["/task.sh","0.2","/task1.txt"],
+      when: {
+        interval: "500ms",
+      },
+      restarts: "5"
+    },
+    {
+      // run a 200ms-long task every 500ms, with 500ms timeout
+      // (i.e. no tasks should timeout)
+      name: "task2",
+      exec: ["/task.sh","0.2","/task2.txt"],
+      timeout: "500ms",
+      when: {
+        interval: "500ms",
+      },
+      restarts: "5"
+    },
+    {
+      // run a 2000ms-long task every 1000ms, with 100ms timeout
+      // (i.e. all tasks will timeout)
+      name: "task3",
+      exec: ["/task.sh","2","/task3.txt"],
+      timeout: "100ms",
+      when: {
+        interval: "500ms",
+      },
+      restarts: "5",
+    },
+    {
+      // run a task without explicit number of restarts
+      // (make sure it fires more than once)
+      name: "task4",
+      exec: ["/task.sh", "0", "/task4.txt"],
+      when: {
+        interval: "1000ms"
+      }
+    }
+  ]
+}

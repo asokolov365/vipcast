@@ -54,7 +54,10 @@ func Init(ctx context.Context) error {
 	}
 
 	httpserver.Init()
-	apiServer := httpserver.NewServer(*config.AppConfig.BindAddr)
+	apiServer := httpserver.NewServer(
+		*config.AppConfig.BindAddr,
+		cluster.VipcastCluster().LocalMember().Name,
+	)
 
 	var serviceDiscovery *discovery.Discovery
 

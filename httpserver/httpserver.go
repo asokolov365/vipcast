@@ -35,7 +35,6 @@ import (
 	"github.com/asokolov365/vipcast/lib/logging"
 	"github.com/klauspost/compress/gzhttp"
 	"github.com/rs/zerolog"
-	"github.com/rs/zerolog/log"
 	"github.com/valyala/fastrand"
 )
 
@@ -58,6 +57,7 @@ var (
 )
 
 var (
+	hostname                   = "localhost"
 	disableResponseCompression = false
 	idleConnTimeout            = 1 * time.Minute
 	connTimeout                = 2 * time.Minute
@@ -75,7 +75,7 @@ type Server struct {
 	listenAddr string
 }
 
-func NewServer(addr string) *Server {
+func NewServer(addr, name string) *Server {
 	var listenAddr string
 	if addr == "" {
 		listenAddr = "127.0.0.1:8179"
@@ -84,6 +84,14 @@ func NewServer(addr string) *Server {
 	} else {
 		listenAddr = addr
 	}
+	if name == "" {
+		h, err := os.Hostname()
+		if err != nil {
+			name = "localhost"
+		}
+		name = h
+	}
+	hostname = name
 	return &Server{
 		listenAddr: listenAddr,
 	}
@@ -156,15 +164,6 @@ var gzipHandlerWrapper = func() func(http.Handler) http.HandlerFunc {
 		panic(fmt.Errorf("BUG: unable to initialize gzip http wrapper: %w", err))
 	}
 	return hw
-}()
-
-var hostname = func() string {
-	name, err := os.Hostname()
-	if err != nil {
-		log.Warn().Err(err).Msg("os.Hostname() failed")
-		return "unknown"
-	}
-	return name
 }()
 
 func handlerWrapper(w http.ResponseWriter, r *http.Request, reqHandler RequestHandler) {
